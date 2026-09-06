@@ -1,0 +1,43 @@
+---
+# cPanel "Git Version Control" deployment manifest — ST PAUL'S (Kebbi) instance.
+# $HOME resolves to the account home (e.g. /home1/rgabfmmy), so paths are portable.
+#
+# Same-origin layout (no separate api subdomain, no CORS):
+#   • App  → portal.stpaulschoolskebbi.com.ng            Document Root: <HOME>/stpauls-portal
+#   • API  → portal.stpaulschoolskebbi.com.ng/api/...     served via a symlink to the backend below.
+#
+# IMPORTANT: files are ONLY copied when you click "Deploy HEAD Commit" in
+#   cPanel → Git Version Control → Manage → Pull or Deploy.
+#
+# ONE-TIME SERVER SETUP:
+#   1. Subdomain portal.stpaulschoolskebbi.com.ng → Document Root: <HOME>/stpauls-portal
+#   2. MultiPHP Manager → set portal.stpaulschoolskebbi.com.ng to PHP 8.x (it runs the API via /api)
+#   3. After the first deploy, create <HOME>/stpauls-api/config/database.php and
+#      <HOME>/stpauls-api/config/ai.php with real values (git-ignored; the deploy
+#      ships only the .example files and never overwrites your real config).
+deployment:
+  tasks:
+    # ── Backend (PHP API) → kept OUTSIDE the web root at <HOME>/stpauls-api ──
+    - /bin/echo "== Deploying ST PAUL'S API to $HOME/stpauls-api (outside docroot) =="
+    - /bin/mkdir -p "$HOME/stpauls-api/app"
+    - /bin/mkdir -p "$HOME/stpauls-api/database"
+    - /bin/mkdir -p "$HOME/stpauls-api/public"
+    - /bin/mkdir -p "$HOME/stpauls-api/config"
+    - /bin/cp -R  backend/app/.      "$HOME/stpauls-api/app/"
+    - /bin/cp -R  backend/database/. "$HOME/stpauls-api/database/"
+    - /bin/cp -R  backend/public/.   "$HOME/stpauls-api/public/"
+    # -n = no-clobber: ships database.php.example / ai.php.example without
+    # overwriting your real config on redeploys.
+    - /bin/cp -Rn backend/config/.   "$HOME/stpauls-api/config/"
+
+    # ── Frontend (React build) → portal.stpaulschoolskebbi.com.ng docroot ──
+    - /bin/echo "== Deploying frontend (SPA) to $HOME/stpauls-portal =="
+    - /bin/mkdir -p "$HOME/stpauls-portal"
+    - /bin/cp -R  learnersforge/dist/. "$HOME/stpauls-portal/"
+
+    # ── Expose the API on the SAME origin at /api → portal.stpaulschoolskebbi.com.ng/api/v1/... ──
+    # ln -sfn is idempotent (safe to re-run every deploy). PHP resolves the real
+    # path, so app/ and config/ stay outside the web root.
+    - /bin/ln -sfn "$HOME/stpauls-api/public" "$HOME/stpauls-portal/api"
+    - /bin/echo "== Docroot now contains: =="
+    - /bin/ls -la "$HOME/stpauls-portal"
