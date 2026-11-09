@@ -12,7 +12,13 @@ import { getStudents, getDashboard, getReportCard, emailReportCards, getBroadshe
          getAttendance, submitAttendance, getTermAttendance, saveTermAttendance, aiChat,
          getExams, getExam, addExamQuestions, deleteExam, updateExamMeta,
          getExamSubmissions, getSubmission, gradeSubmission,
-         getMyExams, getMyExam, submitMyExam, getMyResults, getMyResultDetail, getPublicSchoolInfo, login as apiLogin } from "./api/client";
+         getMyExams, getMyExam, submitMyExam, getMyResults, getMyResultDetail, getPublicSchoolInfo,
+         getRoutes, createRoute, updateRoute, deleteRoute, getTransportAssignments, assignTransport, unassignTransport, recordTransportFee,
+         getStaffAttendance, saveStaffAttendance as apiSaveStaffAttendance, getLeave, requestLeave, decideLeave, getHrPayroll, savePayroll, markPayrollPaid,
+         getPerfAnalytics, getAttAnalytics, getFinanceAnalytics, getAdmissionAnalytics,
+         getAssignments, createAssignment, updateAssignment, deleteAssignment, getAssignmentSubmissions, gradeAssignment, getMyOnlineAssignments, submitMyAssignment,
+         getAudiences, getCommunications, sendCommunication, getEvents, saveEvent as apiSaveEvent, updateEvent, deleteEvent as apiDeleteEvent, sendEventReminder, getParentPreview,
+         login as apiLogin } from "./api/client";
 
 // Map a backend student row (first_name/last_name/class_name/student_id …)
 // onto the field names the UI components render (name/avatar/class/fees/gpa).
@@ -226,7 +232,7 @@ const NAV=[
   {id:"cms",          label:"Website & CMS",      icon:"🌐",group:"ops"},
   {id:"hr",           label:"HR Module",          icon:"👥",group:"ops"},
   {id:"cctv",         label:"CCTV Security",      icon:"📹",group:"ops"},
-  {id:"online-learning",label:"Online Learning",  icon:"🎓",group:"learning"},
+  {id:"online-learning",label:"Online Assignments",  icon:"📝",group:"learning"},
   {id:"communications",label:"Communications",    icon:"📱",group:"learning"},
   {id:"analytics",    label:"Analytics",          icon:"📈",group:"learning"},
 ];
@@ -293,7 +299,7 @@ const Sidebar = ({active,onNav,collapsed,setCollapsed,school,isMobile,mobileOpen
 };
 
 // ── Topbar ────────────────────────────────────────────────────────────────────
-const TITLES={dashboard:"Dashboard",students:"Student Management",staff:"Staff Management",attendance:"Attendance",grades:"Grades & Report Cards",timetable:"Timetable",cbt:"CBT Exams","cbt-create":"Create Exam","cbt-take":"Take Exam","ai-tools":"AI Teaching Tools",fees:"Fees & Finance",messaging:"Messaging",hostel:"Hostel Management",inventory:"Inventory",library:"Library Management",settings:"Settings","admissions":"Admissions & Enrollment","academic-mgmt":"Academic Management","student-extras":"Student Records","transport":"Transport Management","certificates":"Certificates & ID Cards","multi-branch":"Multi-Branch Management","cms":"Website & CMS","hr":"HR Module","online-learning":"Online Learning","communications":"Communications","analytics":"Reports & Analytics"};
+const TITLES={dashboard:"Dashboard",students:"Student Management",staff:"Staff Management",attendance:"Attendance",grades:"Grades & Report Cards",timetable:"Timetable",cbt:"CBT Exams","cbt-create":"Create Exam","cbt-take":"Take Exam","ai-tools":"AI Teaching Tools",fees:"Fees & Finance",messaging:"Messaging",hostel:"Hostel Management",inventory:"Inventory",library:"Library Management",settings:"Settings","admissions":"Admissions & Enrollment","academic-mgmt":"Academic Management","student-extras":"Student Records","transport":"Transport Management","certificates":"Certificates & ID Cards","multi-branch":"Multi-Branch Management","cms":"Website & CMS","hr":"HR Module","online-learning":"Online Assignments","communications":"Communications","analytics":"Reports & Analytics"};
 // Friendly labels for the role stored on the user record.
 const ROLE_LABELS={super_admin:"Super Admin",school_admin:"Administrator",teacher:"Teacher",student:"Student",parent:"Parent",accountant:"Accountant"};
 const Topbar = ({page,onNav,onLogout,school,user,isMobile,onMenu}) => {
@@ -5927,120 +5933,297 @@ const AcademicMgmt = () => {
 // 4. TRANSPORT MANAGEMENT
 // ═══════════════════════════════════════════════════════════════════════════════
 const Transport = () => {
-  const [tab, setTab] = useState("routes");
-  const routes = [
-    {id:"R001",name:"Lekki – VI Route",   driver:"Mr. Adamu Bello",  bus:"LND-342-AA",capacity:35,students:30,fee:25000,status:"Active"},
-    {id:"R002",name:"Surulere – Yaba",    driver:"Mr. Emeka Nwosu",  bus:"LND-218-BB",capacity:30,students:28,fee:22000,status:"Active"},
-    {id:"R003",name:"Ikeja – Ojodu",      driver:"Mr. Kunle Adesanya",bus:"LND-556-CC",capacity:40,students:15,fee:20000,status:"Active"},
-    {id:"R004",name:"Ajah – Sangotedo",   driver:"Mrs. Taiwo Adeyemi",bus:"LND-112-DD",capacity:35,students:35,fee:28000,status:"Full"},
-  ];
-  const drivers = [
-    {id:"D001",name:"Mr. Adamu Bello",   license:"Lagos-DL-2024-001",phone:"08011111111",route:"Lekki – VI",   status:"Active"},
-    {id:"D002",name:"Mr. Emeka Nwosu",   license:"Lagos-DL-2024-002",phone:"08022222222",route:"Surulere – Yaba",status:"Active"},
-    {id:"D003",name:"Mr. Kunle Adesanya",license:"Lagos-DL-2024-003",phone:"08033333333",route:"Ikeja – Ojodu", status:"Active"},
-  ];
+  const [tab, setTab]           = useState("routes");
+  const [terms, setTerms]       = useState([]);
+  const [termId, setTermId]     = useState(null);
+  const [routes, setRoutes]     = useState([]);
+  const [assigns, setAssigns]   = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [routeModal, setRouteModal] = useState(null);   // {} = new, route obj = edit
+  const [assignOpen, setAssignOpen] = useState(false);
+  const [feeRow, setFeeRow]     = useState(null);        // assignment row being paid
+  const [toast, setToast]       = useState("");
+  const flash = m => { setToast(m); setTimeout(() => setToast(""), 2800); };
+  const naira = n => "₦" + Number(n || 0).toLocaleString();
+
+  const loadRoutes  = () => getRoutes().then(r => setRoutes(arrOf(r))).catch(() => setRoutes([]));
+  const loadAssigns = (t) => getTransportAssignments(t).then(r => setAssigns(arrOf(r))).catch(() => setAssigns([]));
+
+  useEffect(() => {
+    let dead = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const tr = await getTerms();
+        const ts = arrOf(tr);
+        if (dead) return;
+        setTerms(ts);
+        const cur = ts.find(t => t.is_current) || ts[0];
+        const tid = cur?.id ?? null;
+        setTermId(tid);
+        await Promise.all([loadRoutes(), loadAssigns(tid)]);
+      } finally { if (!dead) setLoading(false); }
+    })();
+    return () => { dead = true; };
+  }, []);
+
+  useEffect(() => { if (termId) loadAssigns(termId); }, [termId]);
+
+  const saveRoute = async (form) => {
+    try {
+      if (form.id) await updateRoute(form.id, form); else await createRoute(form);
+      setRouteModal(null); flash("Route saved."); loadRoutes();
+    } catch (e) { flash(e?.message || e?.data?.message || "Could not save route."); }
+  };
+  const removeRoute = async (r) => {
+    if (!window.confirm(`Delete route "${r.name}"? This also removes its student assignments.`)) return;
+    try { await deleteRoute(r.id); flash("Route deleted."); loadRoutes(); loadAssigns(termId); }
+    catch (e) { flash(e?.message || e?.data?.message || "Could not delete route."); }
+  };
+  const removeAssign = async (a) => {
+    if (!window.confirm(`Remove ${a.first_name} ${a.last_name} from ${a.route_name}?`)) return;
+    try { await unassignTransport(a.id); flash("Removed."); loadAssigns(termId); }
+    catch (e) { flash(e?.message || e?.data?.message || "Could not remove."); }
+  };
+
+  const enrolledTotal = assigns.length;
+  const withDriver    = routes.filter(r => (r.driver_name || "").trim());
 
   return (
     <div className="fi">
-      <Tabs tabs={[{id:"routes",label:"🚌 Routes"},{id:"drivers",label:"🧑‍✈️ Drivers"},{id:"tracking",label:"📍 Student Pickup"},{id:"fees",label:"💳 Transport Fees"}]} active={tab} onChange={setTab}/>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+        <Tabs tabs={[{id:"routes",label:"🚌 Routes"},{id:"drivers",label:"🧑‍✈️ Drivers"},{id:"tracking",label:"📍 Student Pickup"},{id:"fees",label:"💳 Transport Fees"}]} active={tab} onChange={setTab}/>
+        {(tab==="tracking"||tab==="fees") && terms.length>0 && (
+          <Sel value={termId?String(termId):""} onChange={v=>setTermId(Number(v))}
+               options={terms.map(t=>({value:String(t.id),label:t.name+(t.is_current?" (current)":"")}))} style={{width:190}}/>
+        )}
+      </div>
       <div style={{marginTop:16}}>
+        {loading ? <Card style={{textAlign:"center",color:C.textMuted,padding:"44px"}}>Loading transport…</Card> : <>
 
         {tab==="routes" && (
           <div>
-            <div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}><Btn variant="primary">+ Add Route</Btn></div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:13}}>
-              {routes.map(r=>(
+            <div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}><Btn variant="primary" onClick={()=>setRouteModal({})}>+ Add Route</Btn></div>
+            {routes.length===0 ? (
+              <Card style={{textAlign:"center",padding:"48px 16px"}}><div style={{fontSize:34,marginBottom:10}}>🚌</div><div style={{fontSize:15,fontWeight:700,marginBottom:6}}>No routes yet</div><div style={{fontSize:13,color:C.textMid}}>Add your first bus route to get started.</div></Card>
+            ) : (
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:13}}>
+              {routes.map(r=>{
+                const full = r.capacity && Number(r.enrolled)>=Number(r.capacity);
+                return(
                 <Card key={r.id}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
                     <div style={{display:"flex",gap:11,alignItems:"center"}}>
                       <div style={{width:44,height:44,borderRadius:11,background:C.sky+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>🚌</div>
-                      <div><div style={{fontSize:14,fontWeight:700}}>{r.name}</div><div style={{fontSize:11,color:C.textMuted}}>Bus: {r.bus}</div></div>
+                      <div><div style={{fontSize:14,fontWeight:700}}>{r.name}</div><div style={{fontSize:11,color:C.textMuted}}>Bus: {r.bus_number||"—"}</div></div>
                     </div>
-                    <Badge color={r.status==="Full"?"red":"green"} size="sm">{r.status}</Badge>
+                    <Badge color={!Number(r.is_active)?"gray":full?"red":"green"} size="sm">{!Number(r.is_active)?"Inactive":full?"Full":"Active"}</Badge>
                   </div>
                   <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:12}}>
-                    {[["Driver",r.driver.split(" ")[1]],["Capacity",r.capacity],["Enrolled",r.students]].map(([l,v])=>(
+                    {[["Driver",(r.driver_name||"—").split(" ").slice(-1)[0]],["Capacity",r.capacity||"—"],["Enrolled",r.enrolled||0]].map(([l,v])=>(
                       <div key={l} style={{textAlign:"center",padding:"8px",borderRadius:8,background:"#F8FAFC"}}>
                         <div style={{fontSize:14,fontWeight:700}}>{v}</div><div style={{fontSize:9,color:C.textMuted}}>{l}</div>
                       </div>
                     ))}
                   </div>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                    <span style={{fontSize:13,fontWeight:700,color:C.accentDark}}>₦{r.fee.toLocaleString()}<span style={{fontSize:10,color:C.textMuted,fontWeight:400}}>/term</span></span>
-                    <div style={{display:"flex",gap:7}}><Btn size="sm" variant="secondary">View Students</Btn><Btn size="sm" variant="ghost">✏️ Edit</Btn></div>
+                    <span style={{fontSize:13,fontWeight:700,color:C.accentDark}}>{naira(r.term_fee)}<span style={{fontSize:10,color:C.textMuted,fontWeight:400}}>/term</span></span>
+                    <div style={{display:"flex",gap:7}}><Btn size="sm" variant="ghost" onClick={()=>setRouteModal(r)}>✏️ Edit</Btn><Btn size="sm" variant="ghost" onClick={()=>removeRoute(r)}>🗑</Btn></div>
                   </div>
                 </Card>
-              ))}
+              );})}
             </div>
+            )}
           </div>
         )}
 
         {tab==="drivers" && (
           <div>
-            <div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}><Btn variant="primary">+ Add Driver</Btn></div>
-            <Card style={{padding:0}}>
+            <div style={{fontSize:11,color:C.textMuted,marginBottom:10}}>Drivers are managed per route. Add or edit a driver on its route.</div>
+            {withDriver.length===0 ? (
+              <Card style={{textAlign:"center",padding:"40px 16px",color:C.textMid}}>No drivers assigned to any route yet.</Card>
+            ) : (
+            <Card style={{padding:0,overflowX:"auto"}}>
               <table style={{width:"100%",borderCollapse:"collapse"}}>
-                <thead><tr style={{background:"#F8FAFC"}}>{["Driver","License No.","Phone","Assigned Route","Status","Action"].map(h=><th key={h} style={{padding:"10px 13px",textAlign:"left",fontSize:10,fontWeight:700,color:C.textMuted,textTransform:"uppercase"}}>{h}</th>)}</tr></thead>
+                <thead><tr style={{background:"#F8FAFC"}}>{["Driver","Phone","Assigned Route","Bus No.","Status","Action"].map(h=><th key={h} style={{padding:"10px 13px",textAlign:"left",fontSize:10,fontWeight:700,color:C.textMuted,textTransform:"uppercase"}}>{h}</th>)}</tr></thead>
                 <tbody>
-                  {drivers.map(d=>(
-                    <tr key={d.id} style={{borderBottom:`1px solid ${C.border}`}} onMouseEnter={e=>e.currentTarget.style.background="#F8FAFC"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                      <td style={{padding:"10px 13px"}}><div style={{display:"flex",alignItems:"center",gap:9}}><Avatar initials={d.name.split(" ").map(w=>w[0]).slice(0,2).join("")} size={28} color={C.sky}/><span style={{fontSize:13,fontWeight:600}}>{d.name}</span></div></td>
-                      <td style={{padding:"10px 13px",fontSize:12,fontFamily:"monospace"}}>{d.license}</td>
-                      <td style={{padding:"10px 13px",fontSize:12}}>{d.phone}</td>
-                      <td style={{padding:"10px 13px",fontSize:12}}>{d.route}</td>
-                      <td style={{padding:"10px 13px"}}><Badge color="green" size="sm">{d.status}</Badge></td>
-                      <td style={{padding:"10px 13px"}}><Btn size="sm" variant="secondary">View</Btn></td>
+                  {withDriver.map(r=>(
+                    <tr key={r.id} style={{borderBottom:`1px solid ${C.border}`}}>
+                      <td style={{padding:"10px 13px"}}><div style={{display:"flex",alignItems:"center",gap:9}}><Avatar initials={(r.driver_name||"").split(" ").map(w=>w[0]).slice(0,2).join("")} size={28} color={C.sky}/><span style={{fontSize:13,fontWeight:600}}>{r.driver_name}</span></div></td>
+                      <td style={{padding:"10px 13px",fontSize:12}}>{r.driver_phone||"—"}</td>
+                      <td style={{padding:"10px 13px",fontSize:12}}>{r.name}</td>
+                      <td style={{padding:"10px 13px",fontSize:12,fontFamily:"monospace"}}>{r.bus_number||"—"}</td>
+                      <td style={{padding:"10px 13px"}}><Badge color={Number(r.is_active)?"green":"gray"} size="sm">{Number(r.is_active)?"Active":"Inactive"}</Badge></td>
+                      <td style={{padding:"10px 13px"}}><Btn size="sm" variant="secondary" onClick={()=>setRouteModal(r)}>Edit</Btn></td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </Card>
+            )}
           </div>
         )}
 
         {tab==="tracking" && (
           <div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:16}}>
-              <StatCard label="Total Routes"   value={routes.length}                          color={C.sky}    icon="🗺️"/>
-              <StatCard label="Students on Bus" value={routes.reduce((a,r)=>a+r.students,0)} color={C.accent} icon="👨‍🎓"/>
-              <StatCard label="Active Drivers"  value={drivers.length}                         color={C.purple} icon="🧑‍✈️"/>
+              <StatCard label="Total Routes"    value={routes.length}        color={C.sky}    icon="🗺️"/>
+              <StatCard label="Students on Bus"  value={enrolledTotal}        color={C.accent} icon="👨‍🎓"/>
+              <StatCard label="Drivers"          value={withDriver.length}    color={C.purple} icon="🧑‍✈️"/>
             </div>
-            <Card>
-              <div style={{fontSize:13,fontWeight:700,marginBottom:14}}>📍 Today's Pickup Status</div>
-              {STUDENTS.map((s,i)=>(
-                <div key={s.id} style={{display:"flex",alignItems:"center",gap:12,padding:"9px 0",borderBottom:`1px solid ${C.border}`}}>
-                  <Avatar initials={s.avatar} size={30} color={C.accent}/>
-                  <div style={{flex:1}}><div style={{fontSize:12,fontWeight:600}}>{s.name}</div><div style={{fontSize:10,color:C.textMuted}}>{routes[i%routes.length].name}</div></div>
-                  <Badge color={i%3===0?"green":i%3===1?"amber":"gray"} size="sm">{i%3===0?"Picked Up":i%3===1?"En Route":"Not Registered"}</Badge>
-                </div>
-              ))}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+              <div style={{fontSize:13,fontWeight:700}}>📍 Assigned Students</div>
+              <Btn variant="primary" size="sm" onClick={()=>setAssignOpen(true)} disabled={routes.length===0}>+ Assign Student</Btn>
+            </div>
+            {assigns.length===0 ? (
+              <Card style={{textAlign:"center",padding:"40px 16px",color:C.textMid}}>No students assigned to a route this term. {routes.length===0?"Add a route first.":""}</Card>
+            ) : (
+            <Card style={{padding:0,overflowX:"auto"}}>
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead><tr style={{background:"#F8FAFC"}}>{["Student","Class","Route","Pickup Point","Action"].map(h=><th key={h} style={{padding:"10px 13px",textAlign:"left",fontSize:10,fontWeight:700,color:C.textMuted,textTransform:"uppercase"}}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {assigns.map(a=>(
+                    <tr key={a.id} style={{borderBottom:`1px solid ${C.border}`}}>
+                      <td style={{padding:"10px 13px",fontSize:12,fontWeight:600}}>{a.first_name} {a.last_name}<div style={{fontSize:10,color:C.textMuted,fontFamily:"monospace"}}>{a.admission_no}</div></td>
+                      <td style={{padding:"10px 13px",fontSize:12}}>{a.class_name}</td>
+                      <td style={{padding:"10px 13px",fontSize:12}}>{a.route_name}</td>
+                      <td style={{padding:"10px 13px",fontSize:12}}>{a.pickup_point||"—"}</td>
+                      <td style={{padding:"10px 13px"}}><Btn size="sm" variant="ghost" onClick={()=>removeAssign(a)}>🗑 Remove</Btn></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </Card>
+            )}
           </div>
         )}
 
         {tab==="fees" && (
           <div>
-            <Card style={{padding:0}}>
+            {assigns.length===0 ? (
+              <Card style={{textAlign:"center",padding:"40px 16px",color:C.textMid}}>No transport assignments this term.</Card>
+            ) : (
+            <Card style={{padding:0,overflowX:"auto"}}>
               <table style={{width:"100%",borderCollapse:"collapse"}}>
-                <thead><tr style={{background:"#F8FAFC"}}>{["Student","Route","Term Fee","Paid","Balance","Status"].map(h=><th key={h} style={{padding:"10px 13px",textAlign:"left",fontSize:10,fontWeight:700,color:C.textMuted,textTransform:"uppercase"}}>{h}</th>)}</tr></thead>
+                <thead><tr style={{background:"#F8FAFC"}}>{["Student","Route","Term Fee","Paid","Balance","Status","Action"].map(h=><th key={h} style={{padding:"10px 13px",textAlign:"left",fontSize:10,fontWeight:700,color:C.textMuted,textTransform:"uppercase"}}>{h}</th>)}</tr></thead>
                 <tbody>
-                  {STUDENTS.map((s,i)=>{const fee=routes[i%routes.length].fee;const paid=i%2===0?fee:Math.round(fee*.5);return(
-                    <tr key={s.id} style={{borderBottom:`1px solid ${C.border}`}} onMouseEnter={e=>e.currentTarget.style.background="#F8FAFC"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                      <td style={{padding:"10px 13px",fontSize:12,fontWeight:600}}>{s.name}</td>
-                      <td style={{padding:"10px 13px",fontSize:12}}>{routes[i%routes.length].name}</td>
-                      <td style={{padding:"10px 13px",fontSize:12,fontFamily:"monospace"}}>₦{fee.toLocaleString()}</td>
-                      <td style={{padding:"10px 13px",fontSize:12,fontFamily:"monospace",color:C.accentDark}}>₦{paid.toLocaleString()}</td>
-                      <td style={{padding:"10px 13px",fontSize:12,fontFamily:"monospace",color:(fee-paid)>0?C.coral:C.textMuted}}>₦{(fee-paid).toLocaleString()}</td>
-                      <td style={{padding:"10px 13px"}}><Badge color={paid===fee?"green":"amber"} size="sm">{paid===fee?"Paid":"Part"}</Badge></td>
+                  {assigns.map(a=>{const fee=Number(a.term_fee||0),paid=Number(a.fee_paid||0),bal=fee-paid;return(
+                    <tr key={a.id} style={{borderBottom:`1px solid ${C.border}`}}>
+                      <td style={{padding:"10px 13px",fontSize:12,fontWeight:600}}>{a.first_name} {a.last_name}</td>
+                      <td style={{padding:"10px 13px",fontSize:12}}>{a.route_name}</td>
+                      <td style={{padding:"10px 13px",fontSize:12,fontFamily:"monospace"}}>{naira(fee)}</td>
+                      <td style={{padding:"10px 13px",fontSize:12,fontFamily:"monospace",color:C.accentDark}}>{naira(paid)}</td>
+                      <td style={{padding:"10px 13px",fontSize:12,fontFamily:"monospace",color:bal>0?C.coral:C.textMuted}}>{naira(bal)}</td>
+                      <td style={{padding:"10px 13px"}}><Badge color={paid>=fee&&fee>0?"green":paid>0?"amber":"gray"} size="sm">{paid>=fee&&fee>0?"Paid":paid>0?"Part":"Unpaid"}</Badge></td>
+                      <td style={{padding:"10px 13px"}}><Btn size="sm" variant="secondary" onClick={()=>setFeeRow(a)}>Record</Btn></td>
                     </tr>
                   );})}
                 </tbody>
               </table>
             </Card>
+            )}
           </div>
         )}
+        </>}
       </div>
+
+      {routeModal && <RouteModal route={routeModal} onClose={()=>setRouteModal(null)} onSave={saveRoute}/>}
+      {assignOpen && <AssignTransportModal routes={routes} termId={termId} onClose={()=>setAssignOpen(false)} onDone={()=>{setAssignOpen(false); loadAssigns(termId); loadRoutes();}} flash={flash}/>}
+      {feeRow && <RecordFeeModal row={feeRow} onClose={()=>setFeeRow(null)} onDone={()=>{setFeeRow(null); loadAssigns(termId);}} flash={flash}/>}
+      {toast && <div style={{position:"fixed",bottom:26,right:26,zIndex:2000,background:C.navy,color:"#fff",padding:"11px 18px",borderRadius:11,fontSize:12,fontWeight:600}}>{toast}</div>}
     </div>
+  );
+};
+
+// Add / edit a bus route (also where a route's driver is set).
+const RouteModal = ({ route, onClose, onSave }) => {
+  const isEdit = !!route.id;
+  const [f, setF] = useState({
+    id: route.id, name: route.name||"", bus_number: route.bus_number||"",
+    driver_name: route.driver_name||"", driver_phone: route.driver_phone||"",
+    capacity: route.capacity!=null?String(route.capacity):"", term_fee: route.term_fee!=null?String(route.term_fee):"",
+    is_active: route.is_active!=null?Number(route.is_active):1,
+  });
+  const [saving, setSaving] = useState(false);
+  const set = k => v => setF(p => ({ ...p, [k]: v }));
+  const submit = async () => {
+    if (!f.name.trim()) return;
+    setSaving(true);
+    await onSave({ ...f, capacity: f.capacity===""?null:Number(f.capacity), term_fee: Number(f.term_fee||0), is_active: Number(f.is_active) });
+    setSaving(false);
+  };
+  return (
+    <Modal title={isEdit?"Edit Route":"Add Route"} onClose={saving?()=>{}:onClose} width={560}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+        <Input label="Route Name" value={f.name} onChange={set("name")} placeholder="e.g. Lekki – Victoria Island" style={{gridColumn:"1 / -1"}}/>
+        <Input label="Bus Number" value={f.bus_number} onChange={set("bus_number")} placeholder="e.g. LND-342-AA"/>
+        <Input label="Capacity" value={f.capacity} onChange={set("capacity")} type="number" placeholder="e.g. 35"/>
+        <Input label="Driver Name" value={f.driver_name} onChange={set("driver_name")} placeholder="Driver's full name"/>
+        <Input label="Driver Phone" value={f.driver_phone} onChange={set("driver_phone")} placeholder="+234 …"/>
+        <Input label="Term Fee (₦)" value={f.term_fee} onChange={set("term_fee")} type="number" placeholder="e.g. 25000"/>
+        <Sel label="Status" value={String(f.is_active)} onChange={v=>set("is_active")(Number(v))} options={[{value:"1",label:"Active"},{value:"0",label:"Inactive"}]}/>
+      </div>
+      <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:18}}>
+        <Btn variant="secondary" onClick={onClose} disabled={saving}>Cancel</Btn>
+        <Btn variant="primary" onClick={submit} disabled={saving||!f.name.trim()}>{saving?"Saving…":(isEdit?"Save Changes":"Create Route")}</Btn>
+      </div>
+    </Modal>
+  );
+};
+
+// Assign a student (picked by class) to a route for the current term.
+const AssignTransportModal = ({ routes, termId, onClose, onDone, flash }) => {
+  const [classes, setClasses] = useState([]);
+  const [classId, setClassId] = useState("");
+  const [students, setStudents] = useState([]);
+  const [f, setF] = useState({ student_id:"", route_id:"", pickup_point:"" });
+  const [saving, setSaving] = useState(false);
+  const set = k => v => setF(p => ({ ...p, [k]: v }));
+  useEffect(() => { getClasses().then(r => setClasses(arrOf(r))).catch(()=>setClasses([])); }, []);
+  useEffect(() => {
+    if (!classId) { setStudents([]); return; }
+    getStudents({ class_id: classId, per_page: 200 }).then(r => setStudents(arrOf(r,"students"))).catch(()=>setStudents([]));
+  }, [classId]);
+  const submit = async () => {
+    if (!f.student_id || !f.route_id) { flash("Pick a student and a route."); return; }
+    setSaving(true);
+    try { await assignTransport({ student_id:Number(f.student_id), route_id:Number(f.route_id), term_id:termId, pickup_point:f.pickup_point||null }); flash("Student assigned."); onDone(); }
+    catch (e) { flash(e?.message || e?.data?.message || "Could not assign."); setSaving(false); }
+  };
+  return (
+    <Modal title="Assign Student to Route" onClose={saving?()=>{}:onClose} width={520}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+        <Sel label="Class" value={classId} onChange={v=>{setClassId(v); set("student_id")("");}} options={[{value:"",label:"Select class…"},...classes.map(c=>({value:String(c.id),label:c.name}))]}/>
+        <Sel label="Student" value={f.student_id} onChange={set("student_id")} options={[{value:"",label:classId?"Select student…":"Pick a class first"},...students.map(s=>({value:String(s.id),label:`${s.first_name} ${s.last_name}`}))]}/>
+        <Sel label="Route" value={f.route_id} onChange={set("route_id")} options={[{value:"",label:"Select route…"},...routes.map(r=>({value:String(r.id),label:r.name}))]}/>
+        <Input label="Pickup Point" value={f.pickup_point} onChange={set("pickup_point")} placeholder="e.g. Admiralty Way"/>
+      </div>
+      <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:18}}>
+        <Btn variant="secondary" onClick={onClose} disabled={saving}>Cancel</Btn>
+        <Btn variant="primary" onClick={submit} disabled={saving}>{saving?"Assigning…":"Assign"}</Btn>
+      </div>
+    </Modal>
+  );
+};
+
+// Record the transport fee paid for one assignment.
+const RecordFeeModal = ({ row, onClose, onDone, flash }) => {
+  const [amt, setAmt] = useState(String(row.fee_paid||0));
+  const [saving, setSaving] = useState(false);
+  const submit = async () => {
+    setSaving(true);
+    try { await recordTransportFee({ id: row.id, fee_paid: Number(amt||0) }); flash("Payment recorded."); onDone(); }
+    catch (e) { flash(e?.message || e?.data?.message || "Could not record payment."); setSaving(false); }
+  };
+  return (
+    <Modal title="Record Transport Fee" onClose={saving?()=>{}:onClose} width={420}>
+      <div style={{fontSize:13,color:C.textMid,marginBottom:12}}>{row.first_name} {row.last_name} · {row.route_name} · Term fee <strong>₦{Number(row.term_fee||0).toLocaleString()}</strong></div>
+      <Input label="Total Amount Paid (₦)" value={amt} onChange={setAmt} type="number" placeholder="0"/>
+      <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:18}}>
+        <Btn variant="secondary" onClick={onClose} disabled={saving}>Cancel</Btn>
+        <Btn variant="primary" onClick={submit} disabled={saving}>{saving?"Saving…":"Save"}</Btn>
+      </div>
+    </Modal>
   );
 };
 
@@ -6600,61 +6783,102 @@ const SchoolCMS = () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 // 8. HR MODULE EXTRAS — Leave Management, Staff Attendance, Payslips
 // ═══════════════════════════════════════════════════════════════════════════════
+const HR_MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+const ATT_OPTS = [["present","Present",C.accent],["absent","Absent",C.coral],["late","Late",C.amber],["leave","Leave",C.sky],["holiday","Holiday",C.purple]];
+
 const HRModule = () => {
-  const [tab, setTab] = useState("attendance");
+  const now = new Date();
+  const [tab, setTab]       = useState("attendance");
+  const [staff, setStaff]   = useState([]);           // staff list for dropdowns
+  const [toast, setToast]   = useState("");
+  const flash = m => { setToast(m); setTimeout(() => setToast(""), 2800); };
+  const naira = n => "₦" + Number(n || 0).toLocaleString();
+
+  // Attendance
+  const [attDate, setAttDate] = useState(now.toISOString().slice(0,10));
+  const [attRows, setAttRows] = useState([]);
+  const [att, setAtt]         = useState({});          // staff_id -> status
+  const [attSaving, setAttSaving] = useState(false);
+  // Leave
+  const [leaves, setLeaves]   = useState([]);
   const [leaveModal, setLeaveModal] = useState(false);
+  // Payroll
+  const [month, setMonth]     = useState(now.getMonth()+1);
+  const [year, setYear]       = useState(now.getFullYear());
+  const [payrows, setPayrows] = useState([]);
+  const [payModal, setPayModal] = useState(null);      // {} = new, row = edit
 
-  const leaveRequests = [
-    {id:"L001",staff:"Mrs. Blessing Adeyemi",type:"Medical Leave",  from:"2026-05-20",to:"2026-05-24",days:5, status:"Approved"},
-    {id:"L002",staff:"Mr. Yusuf Abdullahi",  type:"Annual Leave",   from:"2026-06-01",to:"2026-06-10",days:10,status:"Pending"},
-    {id:"L003",staff:"Ms. Ngozi Ike",        type:"Maternity Leave",from:"2026-07-01",to:"2026-09-30",days:90,status:"Approved"},
-    {id:"L004",staff:"Mr. Charles Osei",     type:"Casual Leave",   from:"2026-05-26",to:"2026-05-26",days:1, status:"Pending"},
-  ];
+  useEffect(() => { getStaff().then(r => setStaff(arrOf(r))).catch(()=>setStaff([])); }, []);
 
-  const PAYROLL_DATA = [
-    {id:"TC001",name:"Mrs. Blessing Adeyemi",role:"Teacher",   basic:180000,housing:40000,transport:20000,ded:18000},
-    {id:"TC002",name:"Mr. Charles Osei",     role:"Teacher",   basic:175000,housing:40000,transport:20000,ded:17500},
-    {id:"TC003",name:"Ms. Ngozi Ike",        role:"Teacher",   basic:175000,housing:40000,transport:20000,ded:17500},
-    {id:"ADM1", name:"Mrs. Kemi Fashola",    role:"Admin",     basic:120000,housing:30000,transport:15000,ded:12000},
-  ];
+  const loadAtt = (d) => getStaffAttendance(d).then(r => {
+    const data = r?.data ?? r; const rows = data?.staff || [];
+    setAttRows(rows);
+    const m = {}; rows.forEach(s => { if (s.status) m[s.staff_id] = s.status; });
+    setAtt(m);
+  }).catch(()=>{ setAttRows([]); setAtt({}); });
+  const loadLeave = () => getLeave().then(r => setLeaves(arrOf(r))).catch(()=>setLeaves([]));
+  const loadPay   = (mo,yr) => getHrPayroll(mo,yr).then(r => setPayrows(arrOf(r))).catch(()=>setPayrows([]));
+
+  useEffect(() => { if (tab==="attendance") loadAtt(attDate); }, [tab, attDate]);
+  useEffect(() => { if (tab==="leave") loadLeave(); }, [tab]);
+  useEffect(() => { if (tab==="payslips") loadPay(month, year); }, [tab, month, year]);
+
+  const saveAtt = async () => {
+    setAttSaving(true);
+    try {
+      const records = attRows.map(s => ({ staff_id: s.staff_id, status: att[s.staff_id] || "present" }));
+      await apiSaveStaffAttendance(attDate, records);
+      flash("Attendance saved.");
+    } catch (e) { flash(e?.message || e?.data?.message || "Could not save."); }
+    finally { setAttSaving(false); }
+  };
+  const decide = async (l, status) => {
+    try { await decideLeave(l.id, status); flash(`Leave ${status}.`); loadLeave(); }
+    catch (e) { flash(e?.message || e?.data?.message || "Could not update."); }
+  };
+  const markPaid = async (p) => {
+    try { await markPayrollPaid(p.id); flash("Marked paid."); loadPay(month, year); }
+    catch (e) { flash(e?.message || e?.data?.message || "Could not update."); }
+  };
 
   const PayslipCard = ({ p }) => {
-    const net = p.basic + p.housing + p.transport - p.ded;
+    const gross = Number(p.basic)+Number(p.housing)+Number(p.transport);
+    const net = Number(p.net_pay ?? (gross - Number(p.deductions)));
     return (
       <div style={{border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden"}}>
         <div style={{background:C.navy,padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <div><div style={{color:"#fff",fontSize:13,fontWeight:700}}>{p.name}</div><div style={{color:"#8DA4C0",fontSize:11,marginTop:2}}>{p.role} · May 2026 Payslip</div></div>
-          <div style={{color:C.accent,fontSize:18,fontWeight:700}}>₦{net.toLocaleString()}</div>
+          <div><div style={{color:"#fff",fontSize:13,fontWeight:700}}>{p.first_name} {p.last_name}</div><div style={{color:"#8DA4C0",fontSize:11,marginTop:2}}>{p.designation||p.department||"Staff"} · {HR_MONTHS[month-1]} {year}</div></div>
+          <div style={{textAlign:"right"}}><div style={{color:C.accent,fontSize:18,fontWeight:700}}>{naira(net)}</div><Badge color={p.status==="paid"?"green":"amber"} size="sm">{p.status==="paid"?"Paid":"Pending"}</Badge></div>
         </div>
         <div style={{padding:"12px 18px",background:"#F8FAFC"}}>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
             <div>
               <div style={{fontSize:10,fontWeight:700,color:C.accentDark,marginBottom:6,textTransform:"uppercase"}}>Earnings</div>
-              {[["Basic Salary",p.basic],["Housing Allowance",p.housing],["Transport Allowance",p.transport]].map(([l,v])=>(
-                <div key={l} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:`1px solid ${C.border}`}}><span style={{color:C.textMid}}>{l}</span><span style={{fontWeight:600}}>₦{v.toLocaleString()}</span></div>
+              {[["Basic Salary",p.basic],["Housing",p.housing],["Transport",p.transport]].map(([l,v])=>(
+                <div key={l} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:`1px solid ${C.border}`}}><span style={{color:C.textMid}}>{l}</span><span style={{fontWeight:600}}>{naira(v)}</span></div>
               ))}
-              <div style={{display:"flex",justifyContent:"space-between",fontSize:13,fontWeight:700,padding:"6px 0",color:C.accentDark}}><span>Gross</span><span>₦{(p.basic+p.housing+p.transport).toLocaleString()}</span></div>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:13,fontWeight:700,padding:"6px 0",color:C.accentDark}}><span>Gross</span><span>{naira(gross)}</span></div>
             </div>
             <div>
               <div style={{fontSize:10,fontWeight:700,color:C.coral,marginBottom:6,textTransform:"uppercase"}}>Deductions</div>
-              {[["PAYE Tax",Math.round(p.ded*.6)],["Pension (8%)",Math.round(p.ded*.3)],["Other",Math.round(p.ded*.1)]].map(([l,v])=>(
-                <div key={l} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:`1px solid ${C.border}`}}><span style={{color:C.textMid}}>{l}</span><span style={{fontWeight:600,color:C.coral}}>₦{v.toLocaleString()}</span></div>
-              ))}
-              <div style={{display:"flex",justifyContent:"space-between",fontSize:13,fontWeight:700,padding:"6px 0",color:C.coral}}><span>Total Deductions</span><span>₦{p.ded.toLocaleString()}</span></div>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:`1px solid ${C.border}`}}><span style={{color:C.textMid}}>Total deductions</span><span style={{fontWeight:600,color:C.coral}}>{naira(p.deductions)}</span></div>
+              {p.bank_name && <div style={{fontSize:11,color:C.textMuted,marginTop:8}}>{p.bank_name} · {p.account_number||"—"}</div>}
             </div>
           </div>
           <div style={{marginTop:10,padding:"10px 12px",borderRadius:9,background:C.accentLight,display:"flex",justifyContent:"space-between"}}>
             <span style={{fontSize:13,fontWeight:700}}>NET PAY</span>
-            <span style={{fontSize:16,fontWeight:700,color:C.accentDark}}>₦{net.toLocaleString()}</span>
+            <span style={{fontSize:16,fontWeight:700,color:C.accentDark}}>{naira(net)}</span>
           </div>
           <div style={{display:"flex",gap:7,justifyContent:"flex-end",marginTop:9}}>
-            <Btn size="sm" variant="secondary">📥 Download PDF</Btn>
-            <Btn size="sm" variant="secondary">📧 Email Payslip</Btn>
+            <Btn size="sm" variant="ghost" onClick={()=>setPayModal(p)}>✏️ Edit</Btn>
+            {p.status!=="paid" && <Btn size="sm" variant="primary" onClick={()=>markPaid(p)}>Mark Paid</Btn>}
           </div>
         </div>
       </div>
     );
   };
+
+  const leaveColor = t => /medical/i.test(t)?"red":/annual/i.test(t)?"blue":/maternity|paternity/i.test(t)?"pink":/study/i.test(t)?"purple":"amber";
 
   return (
     <div className="fi">
@@ -6663,88 +6887,159 @@ const HRModule = () => {
 
         {tab==="attendance" && (
           <div>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-              <div style={{display:"flex",gap:9}}>
-                <Input label="" value="2026-05-27" onChange={()=>{}} type="date" style={{width:160}}/>
-              </div>
-              <Btn variant="primary" size="sm">💾 Save Attendance</Btn>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:10}}>
+              <Input label="" value={attDate} onChange={setAttDate} type="date" style={{width:170}}/>
+              <Btn variant="primary" size="sm" onClick={saveAtt} disabled={attSaving||attRows.length===0}>{attSaving?"Saving…":"💾 Save Attendance"}</Btn>
             </div>
+            {attRows.length===0 ? (
+              <Card style={{textAlign:"center",padding:"40px 16px",color:C.textMid}}>No staff found. Add staff first.</Card>
+            ) : (
             <Card style={{padding:0}}>
-              {[...PAYROLL_DATA,...PAYROLL_DATA.slice(0,2)].map((p,i)=>(
-                <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 18px",borderBottom:`1px solid ${C.border}`}}>
-                  <Avatar initials={p.name.split(" ").map(w=>w[0]).slice(0,2).join("")} size={32} color={C.sky}/>
-                  <div style={{flex:1}}><div style={{fontSize:13,fontWeight:600}}>{p.name}</div><div style={{fontSize:11,color:C.textMuted}}>{p.role}</div></div>
-                  <div style={{display:"flex",gap:7}}>
-                    {[["Present","present",C.accent],["Absent","absent",C.coral],["Late","late",C.amber],["Leave","leave",C.sky]].map(([l,v,c])=>(
-                      <button key={v} style={{padding:"5px 11px",borderRadius:7,border:`1.5px solid ${i%4===["present","absent","late","leave"].indexOf(v)?c:C.border}`,background:i%4===["present","absent","late","leave"].indexOf(v)?c+"18":"transparent",fontSize:11,fontWeight:600,cursor:"pointer",color:i%4===["present","absent","late","leave"].indexOf(v)?c:C.textMid}}>{l}</button>
-                    ))}
+              {attRows.map(s=>(
+                <div key={s.staff_id} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 18px",borderBottom:`1px solid ${C.border}`,flexWrap:"wrap"}}>
+                  <Avatar initials={`${(s.first_name||" ")[0]||""}${(s.last_name||" ")[0]||""}`} size={32} color={C.sky}/>
+                  <div style={{flex:1,minWidth:140}}><div style={{fontSize:13,fontWeight:600}}>{s.first_name} {s.last_name}</div><div style={{fontSize:11,color:C.textMuted}}>{s.designation||s.department||s.staff_code}</div></div>
+                  <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+                    {ATT_OPTS.map(([v,l,c])=>{const on=(att[s.staff_id]||"present")===v;return(
+                      <button key={v} onClick={()=>setAtt(p=>({...p,[s.staff_id]:v}))} style={{padding:"5px 11px",borderRadius:7,border:`1.5px solid ${on?c:C.border}`,background:on?c+"18":"transparent",fontSize:11,fontWeight:600,cursor:"pointer",color:on?c:C.textMid}}>{l}</button>
+                    );})}
                   </div>
                 </div>
               ))}
             </Card>
+            )}
           </div>
         )}
 
         {tab==="leave" && (
           <div>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:11}}>
-                <StatCard label="Pending"  value={leaveRequests.filter(l=>l.status==="Pending").length}  color={C.amber}  icon="⏳"/>
-                <StatCard label="Approved" value={leaveRequests.filter(l=>l.status==="Approved").length} color={C.accent} icon="✅"/>
-                <StatCard label="On Leave" value="3" color={C.sky} icon="🏖"/>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:10}}>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:11,flex:1,maxWidth:420}}>
+                <StatCard label="Pending"  value={leaves.filter(l=>l.status==="pending").length}  color={C.amber}  icon="⏳"/>
+                <StatCard label="Approved" value={leaves.filter(l=>l.status==="approved").length} color={C.accent} icon="✅"/>
+                <StatCard label="Rejected" value={leaves.filter(l=>l.status==="rejected").length} color={C.coral} icon="✗"/>
               </div>
               <Btn variant="primary" onClick={()=>setLeaveModal(true)}>+ Request Leave</Btn>
             </div>
-            <Card style={{padding:0}}>
+            {leaves.length===0 ? (
+              <Card style={{textAlign:"center",padding:"40px 16px",color:C.textMid}}>No leave requests yet.</Card>
+            ) : (
+            <Card style={{padding:0,overflowX:"auto"}}>
               <table style={{width:"100%",borderCollapse:"collapse"}}>
                 <thead><tr style={{background:"#F8FAFC"}}>{["Staff","Leave Type","From","To","Days","Status","Action"].map(h=><th key={h} style={{padding:"10px 13px",textAlign:"left",fontSize:10,fontWeight:700,color:C.textMuted,textTransform:"uppercase"}}>{h}</th>)}</tr></thead>
                 <tbody>
-                  {leaveRequests.map(l=>(
-                    <tr key={l.id} style={{borderBottom:`1px solid ${C.border}`}} onMouseEnter={e=>e.currentTarget.style.background="#F8FAFC"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                      <td style={{padding:"10px 13px",fontSize:13,fontWeight:600}}>{l.staff}</td>
-                      <td style={{padding:"10px 13px"}}><Badge color={l.type.includes("Medical")?"red":l.type.includes("Annual")?"blue":l.type.includes("Maternity")?"pink":"amber"} size="sm">{l.type}</Badge></td>
-                      <td style={{padding:"10px 13px",fontSize:12,color:C.textMuted}}>{l.from}</td>
-                      <td style={{padding:"10px 13px",fontSize:12,color:C.textMuted}}>{l.to}</td>
+                  {leaves.map(l=>(
+                    <tr key={l.id} style={{borderBottom:`1px solid ${C.border}`}}>
+                      <td style={{padding:"10px 13px",fontSize:13,fontWeight:600}}>{l.first_name} {l.last_name}</td>
+                      <td style={{padding:"10px 13px"}}><Badge color={leaveColor(l.type)} size="sm">{l.type}</Badge></td>
+                      <td style={{padding:"10px 13px",fontSize:12,color:C.textMuted}}>{l.from_date}</td>
+                      <td style={{padding:"10px 13px",fontSize:12,color:C.textMuted}}>{l.to_date}</td>
                       <td style={{padding:"10px 13px",fontSize:13,fontWeight:700}}>{l.days}</td>
-                      <td style={{padding:"10px 13px"}}><Badge color={l.status==="Approved"?"green":"amber"} size="sm">{l.status}</Badge></td>
+                      <td style={{padding:"10px 13px"}}><Badge color={l.status==="approved"?"green":l.status==="rejected"?"red":"amber"} size="sm">{l.status}</Badge></td>
                       <td style={{padding:"10px 13px"}}>
-                        {l.status==="Pending"&&<div style={{display:"flex",gap:5}}><Btn size="sm" variant="primary">✅</Btn><Btn size="sm" variant="danger">✗</Btn></div>}
-                        {l.status==="Approved"&&<Btn size="sm" variant="ghost">View</Btn>}
+                        {l.status==="pending"
+                          ? <div style={{display:"flex",gap:5}}><Btn size="sm" variant="primary" onClick={()=>decide(l,"approved")}>✅</Btn><Btn size="sm" variant="danger" onClick={()=>decide(l,"rejected")}>✗</Btn></div>
+                          : <span style={{fontSize:11,color:C.textMuted}}>{l.approver_first?`by ${l.approver_first}`:"—"}</span>}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </Card>
+            )}
           </div>
         )}
 
         {tab==="payslips" && (
           <div>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-              <Sel label="" value="May 2026" onChange={()=>{}} options={["May 2026","April 2026","March 2026"].map(m=>({value:m,label:m}))} style={{width:150}}/>
-              <div style={{display:"flex",gap:9}}><Btn variant="secondary">📧 Email All Payslips</Btn><Btn variant="primary">📥 Download All PDFs</Btn></div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:10}}>
+              <div style={{display:"flex",gap:8}}>
+                <Sel value={String(month)} onChange={v=>setMonth(Number(v))} options={HR_MONTHS.map((m,i)=>({value:String(i+1),label:m}))} style={{width:150}}/>
+                <Sel value={String(year)} onChange={v=>setYear(Number(v))} options={[0,1,2].map(d=>now.getFullYear()-d).map(y=>({value:String(y),label:String(y)}))} style={{width:110}}/>
+              </div>
+              <Btn variant="primary" onClick={()=>setPayModal({})} disabled={staff.length===0}>+ Generate Payslip</Btn>
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:14}}>
-              {PAYROLL_DATA.map(p=><PayslipCard key={p.id} p={p}/>)}
+            {payrows.length===0 ? (
+              <Card style={{textAlign:"center",padding:"44px 16px"}}><div style={{fontSize:30,marginBottom:8}}>💰</div><div style={{fontSize:14,fontWeight:700,marginBottom:4}}>No payslips for {HR_MONTHS[month-1]} {year}</div><div style={{fontSize:12,color:C.textMid}}>Click "Generate Payslip" to add one.</div></Card>
+            ) : (
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:14}}>
+              {payrows.map(p=><PayslipCard key={p.id} p={p}/>)}
             </div>
+            )}
           </div>
         )}
       </div>
 
-      {leaveModal&&<Modal title="📝 Leave Request" onClose={()=>setLeaveModal(false)} width={460}>
-        <div style={{display:"flex",flexDirection:"column",gap:12}}>
-          <Sel label="Staff Member" value="" onChange={()=>{}} options={[{value:"",label:"Select staff"},...PAYROLL_DATA.map(p=>({value:p.id,label:p.name}))]}/>
-          <Sel label="Leave Type" value="Annual Leave" onChange={()=>{}} options={["Annual Leave","Medical Leave","Maternity Leave","Paternity Leave","Casual Leave","Study Leave"].map(t=>({value:t,label:t}))}/>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            <Input label="From Date" value="" onChange={()=>{}} type="date"/>
-            <Input label="To Date"   value="" onChange={()=>{}} type="date"/>
-          </div>
-          <div><label style={{fontSize:11,fontWeight:700,color:C.textMid,textTransform:"uppercase",letterSpacing:".4px",display:"block",marginBottom:4}}>Reason</label><textarea placeholder="Brief reason for leave request…" style={{width:"100%",padding:"8px 11px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,minHeight:70,resize:"none",outline:"none",fontFamily:"Sora,sans-serif"}} onFocus={e=>e.target.style.borderColor=C.accent} onBlur={e=>e.target.style.borderColor=C.border}/></div>
-          <div style={{display:"flex",gap:9,justifyContent:"flex-end"}}><Btn variant="secondary" onClick={()=>setLeaveModal(false)}>Cancel</Btn><Btn variant="primary" onClick={()=>setLeaveModal(false)}>Submit Request</Btn></div>
-        </div>
-      </Modal>}
+      {leaveModal && <LeaveModal staff={staff} onClose={()=>setLeaveModal(false)} onDone={()=>{setLeaveModal(false); loadLeave();}} flash={flash}/>}
+      {payModal && <PayslipModal row={payModal} staff={staff} month={month} year={year} onClose={()=>setPayModal(null)} onDone={()=>{setPayModal(null); loadPay(month,year);}} flash={flash}/>}
+      {toast && <div style={{position:"fixed",bottom:26,right:26,zIndex:2000,background:C.navy,color:"#fff",padding:"11px 18px",borderRadius:11,fontSize:12,fontWeight:600}}>{toast}</div>}
     </div>
+  );
+};
+
+const LeaveModal = ({ staff, onClose, onDone, flash }) => {
+  const [f, setF] = useState({ staff_id:"", type:"Annual Leave", from_date:"", to_date:"", reason:"" });
+  const [saving, setSaving] = useState(false);
+  const set = k => v => setF(p => ({ ...p, [k]: v }));
+  const submit = async () => {
+    if (!f.staff_id || !f.from_date || !f.to_date) { flash("Staff and dates are required."); return; }
+    setSaving(true);
+    try { await requestLeave({ ...f, staff_id:Number(f.staff_id) }); flash("Leave requested."); onDone(); }
+    catch (e) { flash(e?.message || e?.data?.message || "Could not submit."); setSaving(false); }
+  };
+  return (
+    <Modal title="📝 Leave Request" onClose={saving?()=>{}:onClose} width={480}>
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        <Sel label="Staff Member" value={f.staff_id} onChange={set("staff_id")} options={[{value:"",label:"Select staff…"},...staff.map(s=>({value:String(s.id),label:`${s.first_name} ${s.last_name}`}))]}/>
+        <Sel label="Leave Type" value={f.type} onChange={set("type")} options={["Annual Leave","Medical Leave","Maternity Leave","Paternity Leave","Casual Leave","Study Leave"].map(t=>({value:t,label:t}))}/>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <Input label="From Date" value={f.from_date} onChange={set("from_date")} type="date"/>
+          <Input label="To Date"   value={f.to_date}   onChange={set("to_date")}   type="date"/>
+        </div>
+        <Input label="Reason" value={f.reason} onChange={set("reason")} placeholder="Brief reason (optional)"/>
+        <div style={{display:"flex",gap:9,justifyContent:"flex-end"}}><Btn variant="secondary" onClick={onClose} disabled={saving}>Cancel</Btn><Btn variant="primary" onClick={submit} disabled={saving}>{saving?"Submitting…":"Submit Request"}</Btn></div>
+      </div>
+    </Modal>
+  );
+};
+
+const PayslipModal = ({ row, staff, month, year, onClose, onDone, flash }) => {
+  const isEdit = !!row.id;
+  const [f, setF] = useState({
+    staff_id: row.staff_id?String(row.staff_id):"",
+    basic: row.basic!=null?String(row.basic):"", housing: row.housing!=null?String(row.housing):"",
+    transport: row.transport!=null?String(row.transport):"", deductions: row.deductions!=null?String(row.deductions):"",
+  });
+  const [saving, setSaving] = useState(false);
+  const set = k => v => setF(p => ({ ...p, [k]: v }));
+  const net = (Number(f.basic||0)+Number(f.housing||0)+Number(f.transport||0)-Number(f.deductions||0));
+  const submit = async () => {
+    if (!f.staff_id) { flash("Pick a staff member."); return; }
+    setSaving(true);
+    try {
+      await savePayroll({ staff_id:Number(f.staff_id), month, year, basic:Number(f.basic||0), housing:Number(f.housing||0), transport:Number(f.transport||0), deductions:Number(f.deductions||0) });
+      flash("Payslip saved."); onDone();
+    } catch (e) { flash(e?.message || e?.data?.message || "Could not save."); setSaving(false); }
+  };
+  return (
+    <Modal title={isEdit?"Edit Payslip":"Generate Payslip"} onClose={saving?()=>{}:onClose} width={500}>
+      <div style={{fontSize:12,color:C.textMuted,marginBottom:12}}>For {HR_MONTHS[month-1]} {year}</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+        <div style={{gridColumn:"1 / -1"}}>
+          <Sel label="Staff Member" value={f.staff_id} onChange={set("staff_id")} disabled={isEdit}
+               options={[{value:"",label:"Select staff…"},...staff.map(s=>({value:String(s.id),label:`${s.first_name} ${s.last_name}`}))]}/>
+        </div>
+        <Input label="Basic (₦)" value={f.basic} onChange={set("basic")} type="number"/>
+        <Input label="Housing (₦)" value={f.housing} onChange={set("housing")} type="number"/>
+        <Input label="Transport (₦)" value={f.transport} onChange={set("transport")} type="number"/>
+        <Input label="Deductions (₦)" value={f.deductions} onChange={set("deductions")} type="number"/>
+      </div>
+      <div style={{marginTop:14,padding:"10px 14px",borderRadius:9,background:C.accentLight,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <span style={{fontSize:13,fontWeight:700}}>Net Pay</span>
+        <span style={{fontSize:16,fontWeight:700,color:C.accentDark}}>₦{net.toLocaleString()}</span>
+      </div>
+      <div style={{display:"flex",gap:9,justifyContent:"flex-end",marginTop:16}}><Btn variant="secondary" onClick={onClose} disabled={saving}>Cancel</Btn><Btn variant="primary" onClick={submit} disabled={saving}>{saving?"Saving…":"Save Payslip"}</Btn></div>
+    </Modal>
   );
 };
 
@@ -6752,119 +7047,170 @@ const HRModule = () => {
 // 9. ONLINE LEARNING — Virtual Classes, Recorded Lectures, Online Assignments
 // ═══════════════════════════════════════════════════════════════════════════════
 const OnlineLearning = () => {
-  const [tab, setTab] = useState("live");
-  const [schedModal, setSchedModal] = useState(false);
+  const [classes, setClasses] = useState([]);
+  const [classId, setClassId] = useState("");
+  const [subjects, setSubjects] = useState([]);
+  const [termId, setTermId]   = useState(null);
+  const [list, setList]       = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [modal, setModal]     = useState(null);   // {} = new, obj = edit
+  const [subView, setSubView] = useState(null);    // { assignment, submissions }
+  const [toast, setToast]     = useState("");
+  const flash = m => { setToast(m); setTimeout(() => setToast(""), 2600); };
 
-  const liveClasses = [
-    {id:"LC001",title:"Quadratic Equations – Live Session", subject:"Mathematics",teacher:"Mrs. Adeyemi",class:"SSS 2",date:"2026-05-27",time:"10:00 AM",duration:"1 hour",status:"Scheduled",platform:"Google Meet"},
-    {id:"LC002",title:"English Essay Writing Workshop",     subject:"English",    teacher:"Mr. Osei",   class:"JSS 3",date:"2026-05-27",time:"2:00 PM", duration:"45 min",status:"Live Now",  platform:"Zoom"},
-    {id:"LC003",title:"Cell Division & Mitosis",           subject:"Biology",    teacher:"Ms. Ike",    class:"SSS 1",date:"2026-05-28",time:"9:00 AM", duration:"1 hour",status:"Scheduled",platform:"Google Meet"},
-  ];
-  const recordings = [
-    {id:"R001",title:"Introduction to Trigonometry",     subject:"Mathematics",teacher:"Mrs. Adeyemi",class:"SSS 2",duration:"58 min",views:142,date:"2026-05-20"},
-    {id:"R002",title:"Nigeria's Independence Movement",  subject:"History",    teacher:"Mr. Abdullahi",class:"SSS 3",duration:"45 min",views:98, date:"2026-05-18"},
-    {id:"R003",title:"Newton's Laws of Motion",          subject:"Physics",    teacher:"Mrs. Adeyemi",class:"SSS 2",duration:"52 min",views:210,date:"2026-05-15"},
-  ];
+  useEffect(() => {
+    getClasses().then(r => { const cs = arrOf(r); setClasses(cs); setClassId(p => p || (cs[0] ? String(cs[0].id) : "")); }).catch(()=>{});
+    getSubjects().then(r => setSubjects(arrOf(r))).catch(()=>{});
+    getTerms().then(r => { const ts = arrOf(r); const cur = ts.find(t=>t.is_current)||ts[0]; setTermId(cur?.id ?? null); }).catch(()=>{});
+  }, []);
+
+  const load = (cid) => { if (!cid) { setList([]); return; } setLoading(true); getAssignments(cid).then(r => setList(arrOf(r))).catch(()=>setList([])).finally(()=>setLoading(false)); };
+  useEffect(() => { if (classId) load(classId); }, [classId]);
+
+  const remove = async (a) => {
+    if (!window.confirm(`Delete "${a.title}"? Student submissions will be removed.`)) return;
+    try { await deleteAssignment(a.id); flash("Assignment deleted."); load(classId); }
+    catch (e) { flash(e?.message || e?.data?.message || "Could not delete."); }
+  };
+  const openSubs = async (a) => {
+    try { const r = await getAssignmentSubmissions(a.id); setSubView(r?.data ?? r); }
+    catch (e) { flash(e?.message || e?.data?.message || "Could not load submissions."); }
+  };
+  const dueBadge = (d) => {
+    if (!d) return null;
+    const over = new Date(d) < new Date(new Date().toDateString());
+    return <Badge color={over?"red":"blue"} size="sm">Due {d}{over?" (past)":""}</Badge>;
+  };
+
+  if (subView) return (
+    <SubmissionsView view={subView} onBack={()=>{setSubView(null); load(classId);}} flash={flash}/>
+  );
 
   return (
     <div className="fi">
-      <div style={{display:"flex",gap:12,alignItems:"center",padding:"12px 18px",background:`linear-gradient(135deg,${C.purple} 0%,${C.sky} 100%)`,borderRadius:12,marginBottom:18}}>
-        <div style={{width:40,height:40,borderRadius:10,background:"rgba(255,255,255,.2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20}}>🎓</div>
-        <div><div style={{color:"#fff",fontSize:14,fontWeight:700}}>Online Learning Centre</div><div style={{color:"rgba(255,255,255,.75)",fontSize:11,marginTop:2}}>Virtual classes, recorded lectures and online assignments</div></div>
-        <div style={{marginLeft:"auto"}}><Btn variant="secondary" size="sm" onClick={()=>setSchedModal(true)}>+ Schedule Class</Btn></div>
-      </div>
-
-      <Tabs tabs={[{id:"live",label:"🔴 Live Classes"},{id:"recordings",label:"🎥 Recordings"},{id:"online-assignments",label:"📝 Online Assignments"}]} active={tab} onChange={setTab}/>
-      <div style={{marginTop:16}}>
-
-        {tab==="live" && (
-          <div style={{display:"flex",flexDirection:"column",gap:12}}>
-            {liveClasses.map(lc=>(
-              <Card key={lc.id}>
-                <div style={{display:"flex",gap:14,alignItems:"center"}}>
-                  <div style={{width:54,height:54,borderRadius:12,background:lc.status==="Live Now"?C.coral+"22":C.accentLight,border:`2px solid ${lc.status==="Live Now"?C.coral:C.accent}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,flexShrink:0}}>{lc.status==="Live Now"?"🔴":"📹"}</div>
-                  <div style={{flex:1}}>
-                    <div style={{display:"flex",gap:9,alignItems:"center",marginBottom:4}}>
-                      <span style={{fontSize:14,fontWeight:700}}>{lc.title}</span>
-                      {lc.status==="Live Now"&&<Badge color="red">🔴 LIVE</Badge>}
-                      {lc.status==="Scheduled"&&<Badge color="blue" size="sm">Scheduled</Badge>}
-                    </div>
-                    <div style={{fontSize:12,color:C.textMuted}}>{lc.subject} · {lc.class} · {lc.teacher} · {lc.date} at {lc.time} · {lc.duration}</div>
-                    <div style={{fontSize:11,color:C.textMid,marginTop:2}}>Platform: {lc.platform}</div>
-                  </div>
-                  <div style={{display:"flex",gap:8}}>
-                    {lc.status==="Live Now"&&<Btn variant="danger">Join Now →</Btn>}
-                    {lc.status==="Scheduled"&&<><Btn size="sm" variant="secondary">Edit</Btn><Btn size="sm" variant="primary">📧 Notify Students</Btn></>}
-                  </div>
-                </div>
-              </Card>
-            ))}
-          </div>
-        )}
-
-        {tab==="recordings" && (
-          <div>
-            <div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}><Btn variant="primary">📎 Upload Recording</Btn></div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}>
-              {recordings.map(r=>(
-                <Card key={r.id} style={{cursor:"pointer"}} onClick={()=>{}}>
-                  <div style={{width:"100%",height:90,borderRadius:9,background:`linear-gradient(135deg,${C.navy} 0%,${C.navyMid} 100%)`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:32,marginBottom:11,position:"relative"}}>
-                    ▶️
-                    <div style={{position:"absolute",bottom:7,right:8,background:"rgba(0,0,0,.6)",color:"#fff",fontSize:10,borderRadius:4,padding:"2px 6px"}}>{r.duration}</div>
-                  </div>
-                  <div style={{fontSize:13,fontWeight:700,lineHeight:1.3}}>{r.title}</div>
-                  <div style={{fontSize:11,color:C.textMuted,marginTop:4}}>{r.subject} · {r.class}</div>
-                  <div style={{display:"flex",justifyContent:"space-between",marginTop:9,fontSize:11,color:C.textMid}}>
-                    <span>👁 {r.views} views</span><span>{r.date}</span>
-                  </div>
-                </Card>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {tab==="online-assignments" && (
-          <div>
-            <div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}><Btn variant="primary">+ Create Online Assignment</Btn></div>
-            <div style={{display:"flex",flexDirection:"column",gap:11}}>
-              {[["Algebra Problem Set","Mathematics","SSS 2B","2026-05-30",22,28,"Open"],["Comprehension Exercise","English","JSS 3A","2026-05-28",28,30,"Open"],["Lab Report – Titration","Chemistry","SSS 1A","2026-05-26",15,24,"Closed"]].map(([title,subj,cls,due,sub,total,status])=>{
-                const pct=Math.round(sub/total*100);
-                return(
-                  <Card key={title}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:11}}>
-                      <div>
-                        <div style={{fontSize:13,fontWeight:700}}>{title}</div>
-                        <div style={{fontSize:11,color:C.textMuted,marginTop:3}}>{subj} · {cls} · Due: <strong style={{color:status==="Open"?C.amber:C.textMuted}}>{due}</strong></div>
-                      </div>
-                      <Badge color={status==="Open"?"green":"gray"}>{status}</Badge>
-                    </div>
-                    <div style={{display:"flex",alignItems:"center",gap:12}}>
-                      <div style={{flex:1,height:5,borderRadius:99,background:C.border}}><div style={{height:5,borderRadius:99,background:pct>=80?C.accent:pct>=50?C.amber:C.coral,width:pct+"%"}}/></div>
-                      <span style={{fontSize:12,fontWeight:700,minWidth:65,textAlign:"right"}}>{sub}/{total} submitted</span>
-                      <Btn size="sm" variant="secondary">Review</Btn>
-                    </div>
-                  </Card>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {schedModal&&<Modal title="📅 Schedule Virtual Class" onClose={()=>setSchedModal(false)} width={500}>
-        <div style={{display:"flex",flexDirection:"column",gap:12}}>
-          <Input label="Session Title" value="" onChange={()=>{}} placeholder="e.g. Quadratic Equations – Live Session"/>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            <Sel label="Subject" value="Mathematics" onChange={()=>{}} options={SUBJECTS.map(s=>({value:s,label:s}))}/>
-            <Sel label="Class"   value="SSS 2A"      onChange={()=>{}} options={CLASSES.map(c=>({value:c,label:c}))}/>
-            <Input label="Date"  value=""             onChange={()=>{}} type="date"/>
-            <Input label="Time"  value=""             onChange={()=>{}} type="time"/>
-            <Sel label="Duration" value="60" onChange={()=>{}} options={["30","45","60","90","120"].map(d=>({value:d,label:d+" minutes"}))}/>
-            <Sel label="Platform" value="google-meet" onChange={()=>{}} options={[{value:"google-meet",label:"Google Meet"},{value:"zoom",label:"Zoom"},{value:"teams",label:"Microsoft Teams"}]}/>
-          </div>
-          <div style={{display:"flex",gap:9,justifyContent:"flex-end"}}><Btn variant="secondary" onClick={()=>setSchedModal(false)}>Cancel</Btn><Btn variant="primary" onClick={()=>setSchedModal(false)}>📅 Schedule Class</Btn></div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap",marginBottom:16}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <span style={{fontSize:13,fontWeight:700}}>📝 Online Assignments</span>
+          <Sel value={classId} onChange={setClassId} options={[{value:"",label:"Select class…"},...classes.map(c=>({value:String(c.id),label:c.name}))]} style={{width:180}}/>
         </div>
-      </Modal>}
+        <Btn variant="primary" onClick={()=>setModal({})} disabled={!classId}>+ New Assignment</Btn>
+      </div>
+      {loading ? <Card style={{textAlign:"center",color:C.textMuted,padding:"40px"}}>Loading…</Card>
+      : list.length===0 ? (
+        <Card style={{textAlign:"center",padding:"48px 16px"}}><div style={{fontSize:34,marginBottom:10}}>📝</div><div style={{fontSize:15,fontWeight:700,marginBottom:6}}>No assignments yet</div><div style={{fontSize:13,color:C.textMid}}>{classId?"Post the first assignment for this class.":"Pick a class to begin."}</div></Card>
+      ) : (
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:13}}>
+          {list.map(a=>(
+            <Card key={a.id}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:8}}>
+                <div style={{fontSize:14,fontWeight:700}}>{a.title}</div>
+                <span style={{fontSize:12,fontWeight:700,color:C.accentDark,whiteSpace:"nowrap"}}>{a.max_marks} mk</span>
+              </div>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:9}}>
+                {a.subject_name && <Badge color="purple" size="sm">{a.subject_name}</Badge>}
+                {dueBadge(a.due_date)}
+              </div>
+              {a.instructions && <div style={{fontSize:12,color:C.textMid,marginBottom:10,maxHeight:48,overflow:"hidden"}}>{a.instructions}</div>}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:6}}>
+                <div style={{fontSize:11,color:C.textMuted}}>📥 {a.submitted||0}/{a.class_size||0} submitted · {a.graded||0} graded</div>
+              </div>
+              <div style={{display:"flex",gap:7,justifyContent:"flex-end",marginTop:10}}>
+                <Btn size="sm" variant="secondary" onClick={()=>openSubs(a)}>Submissions</Btn>
+                <Btn size="sm" variant="ghost" onClick={()=>setModal(a)}>✏️</Btn>
+                <Btn size="sm" variant="ghost" onClick={()=>remove(a)}>🗑</Btn>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+      {modal && <AssignmentModal assignment={modal} classId={classId} termId={termId} subjects={subjects}
+                   onClose={()=>setModal(null)} onDone={()=>{setModal(null); load(classId);}} flash={flash}/>}
+      {toast && <div style={{position:"fixed",bottom:26,right:26,zIndex:2000,background:C.navy,color:"#fff",padding:"11px 18px",borderRadius:11,fontSize:12,fontWeight:600}}>{toast}</div>}
+    </div>
+  );
+};
+
+const AssignmentModal = ({ assignment, classId, termId, subjects, onClose, onDone, flash }) => {
+  const isEdit = !!assignment.id;
+  const [f, setF] = useState({
+    title: assignment.title||"", subject_id: assignment.subject_id?String(assignment.subject_id):"",
+    instructions: assignment.instructions||"", resource_url: assignment.resource_url||"",
+    due_date: (assignment.due_date||"").slice(0,10), max_marks: assignment.max_marks!=null?String(assignment.max_marks):"100",
+  });
+  const [saving, setSaving] = useState(false);
+  const set = k => v => setF(p => ({ ...p, [k]: v }));
+  const submit = async () => {
+    if (!f.title.trim()) { flash("Title is required."); return; }
+    setSaving(true);
+    const payload = { ...f, class_id:Number(classId), term_id:termId, subject_id:f.subject_id?Number(f.subject_id):null, max_marks:Number(f.max_marks||100) };
+    try { if (isEdit) await updateAssignment(assignment.id, payload); else await createAssignment(payload); flash("Assignment saved."); onDone(); }
+    catch (e) { flash(e?.message || e?.data?.message || "Could not save."); setSaving(false); }
+  };
+  return (
+    <Modal title={isEdit?"Edit Assignment":"New Assignment"} onClose={saving?()=>{}:onClose} width={560}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+        <Input label="Title" value={f.title} onChange={set("title")} placeholder="e.g. Essay: My Hero" style={{gridColumn:"1 / -1"}}/>
+        <Sel label="Subject (optional)" value={f.subject_id} onChange={set("subject_id")} options={[{value:"",label:"None"},...subjects.map(s=>({value:String(s.id),label:s.name}))]}/>
+        <Input label="Due Date" value={f.due_date} onChange={set("due_date")} type="date"/>
+        <Input label="Max Marks" value={f.max_marks} onChange={set("max_marks")} type="number"/>
+        <Input label="Resource Link (optional)" value={f.resource_url} onChange={set("resource_url")} placeholder="https://…"/>
+        <Input label="Instructions" value={f.instructions} onChange={set("instructions")} placeholder="What students should do…" style={{gridColumn:"1 / -1"}}/>
+      </div>
+      <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:18}}>
+        <Btn variant="secondary" onClick={onClose} disabled={saving}>Cancel</Btn>
+        <Btn variant="primary" onClick={submit} disabled={saving||!f.title.trim()}>{saving?"Saving…":(isEdit?"Save":"Post Assignment")}</Btn>
+      </div>
+    </Modal>
+  );
+};
+
+const SubmissionsView = ({ view, onBack, flash }) => {
+  const a = view.assignment || {};
+  const [rows, setRows] = useState(view.submissions || []);
+  const [marks, setMarks] = useState(() => { const m={}; (view.submissions||[]).forEach(s=>{ if(s.submission_id) m[s.submission_id]={marks:s.marks??"",feedback:s.feedback||""}; }); return m; });
+  const [savingId, setSavingId] = useState(null);
+  const saveGrade = async (s) => {
+    const g = marks[s.submission_id] || {};
+    setSavingId(s.submission_id);
+    try { await gradeAssignment(s.submission_id, { marks:g.marks===""?null:Number(g.marks), feedback:g.feedback||"" });
+      setRows(rs=>rs.map(r=>r.submission_id===s.submission_id?{...r,marks:g.marks===""?null:Number(g.marks),feedback:g.feedback}:r)); flash("Grade saved."); }
+    catch (e) { flash(e?.message || e?.data?.message || "Could not save grade."); }
+    finally { setSavingId(null); }
+  };
+  const submitted = rows.filter(r=>r.submission_id);
+  return (
+    <div className="fi">
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:14,flexWrap:"wrap"}}>
+        <Btn variant="secondary" size="sm" onClick={onBack}>← Back to assignments</Btn>
+        <div style={{textAlign:"right"}}><div style={{fontSize:14,fontWeight:700}}>{a.title}</div><div style={{fontSize:12,color:C.textMid}}>{submitted.length}/{rows.length} submitted · max {a.max_marks} marks</div></div>
+      </div>
+      <Card style={{padding:0,overflowX:"auto"}}>
+        <table style={{width:"100%",borderCollapse:"collapse"}}>
+          <thead><tr style={{background:"#F8FAFC"}}>{["Student","Submitted","Answer / Link","Marks","Feedback",""].map(h=><th key={h} style={{padding:"10px 13px",textAlign:"left",fontSize:10,fontWeight:700,color:C.textMuted,textTransform:"uppercase"}}>{h}</th>)}</tr></thead>
+          <tbody>
+            {rows.map(s=>(
+              <tr key={s.student_id} style={{borderBottom:`1px solid ${C.border}`}}>
+                <td style={{padding:"10px 13px",fontSize:12,fontWeight:600}}>{s.first_name} {s.last_name}<div style={{fontSize:10,color:C.textMuted,fontFamily:"monospace"}}>{s.admission_no}</div></td>
+                <td style={{padding:"10px 13px",fontSize:11,color:C.textMuted}}>{s.submitted_at?new Date(s.submitted_at).toLocaleDateString():<Badge color="gray" size="sm">Not submitted</Badge>}</td>
+                <td style={{padding:"10px 13px",fontSize:12,maxWidth:260}}>
+                  {s.content && <div style={{whiteSpace:"pre-wrap",maxHeight:70,overflow:"auto"}}>{s.content}</div>}
+                  {s.link_url && <a href={s.link_url} target="_blank" rel="noreferrer" style={{color:C.accentDark,fontSize:11}}>🔗 link</a>}
+                  {!s.content && !s.link_url && "—"}
+                </td>
+                <td style={{padding:"10px 13px"}}>
+                  {s.submission_id ? <input type="number" min={0} max={a.max_marks} value={(marks[s.submission_id]||{}).marks ?? ""} onChange={e=>setMarks(p=>({...p,[s.submission_id]:{...(p[s.submission_id]||{}),marks:e.target.value}}))} style={{width:60,padding:"6px 8px",borderRadius:7,border:`1px solid ${C.border}`,fontSize:13,textAlign:"center",color:C.text}}/> : <span style={{color:C.textMuted}}>—</span>}
+                </td>
+                <td style={{padding:"10px 13px"}}>
+                  {s.submission_id ? <input value={(marks[s.submission_id]||{}).feedback ?? ""} onChange={e=>setMarks(p=>({...p,[s.submission_id]:{...(p[s.submission_id]||{}),feedback:e.target.value}}))} placeholder="Feedback…" style={{width:150,padding:"6px 8px",borderRadius:7,border:`1px solid ${C.border}`,fontSize:12,color:C.text}}/> : null}
+                </td>
+                <td style={{padding:"10px 13px"}}>
+                  {s.submission_id ? <Btn size="sm" variant="primary" onClick={()=>saveGrade(s)} disabled={savingId===s.submission_id}>{savingId===s.submission_id?"…":"Save"}</Btn> : null}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Card>
     </div>
   );
 };
@@ -6872,273 +7218,495 @@ const OnlineLearning = () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 // 10. COMMUNICATION EXTRAS — SMS Notifications, Event Reminders, Parent Portal Preview
 // ═══════════════════════════════════════════════════════════════════════════════
-const Communications = () => {
-  const [tab, setTab] = useState("sms");
-  const [smsModal, setSmsModal] = useState(false);
+const AUD_LABELS = { all_guardians:"All Guardians", class_guardians:"Guardians of a Class", all_staff:"All Staff" };
 
-  const smsLogs = [
-    {id:"S001",recipient:"All Parents",    message:"Reminder: School fees for 2nd term are due by May 31.",  sent:1284,delivered:1270,date:"2026-05-20 9:00 AM",status:"Delivered"},
-    {id:"S002",recipient:"SSS 3 Parents", message:"Final exams commence June 15. Please ensure wards prepare.",sent:120, delivered:118, date:"2026-05-18 2:30 PM",status:"Delivered"},
-    {id:"S003",recipient:"JSS 3A Parents",message:"Kofi Mensah was marked absent today without explanation.",    sent:1,   delivered:1,   date:"2026-05-17 8:45 AM",status:"Delivered"},
-  ];
-  const reminders = [
-    {id:"R001",event:"End of Term Exams",    date:"Jun 15, 2026",  sendDate:"Jun 8, 2026",  audience:"All Parents & Students",  status:"Scheduled"},
-    {id:"R002",event:"Prize Giving Day",     date:"Jul 5, 2026",   sendDate:"Jun 28, 2026", audience:"All Parents",             status:"Scheduled"},
-    {id:"R003",event:"School Fees Deadline", date:"May 31, 2026",  sendDate:"May 25, 2026", audience:"Owing Parents",           status:"Sent"},
-    {id:"R004",event:"New Session Resumption",date:"Sep 8, 2026",  sendDate:"Sep 1, 2026",  audience:"All Parents & Students",  status:"Pending"},
-  ];
+const Communications = () => {
+  const [tab, setTab]         = useState("broadcast");
+  const [aud, setAud]         = useState(null);      // {all_guardians, all_staff, classes, whatsapp_configured}
+  const [history, setHistory] = useState([]);
+  const [events, setEvents]   = useState([]);
+  const [students, setStudents] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [evtModal, setEvtModal]   = useState(null);  // {} = new, event obj = edit
+  const [remindFor, setRemindFor] = useState(null);  // event being reminded
+  const [previewId, setPreviewId] = useState("");
+  const [preview, setPreview]     = useState(null);
+  const [toast, setToast]     = useState("");
+  const flash = m => { setToast(m); setTimeout(() => setToast(""), 3600); };
+
+  const [form, setForm] = useState({ audience:"all_guardians", class_id:"", subject:"", body:"", email:true, whatsapp:false });
+  const setF = patch => setForm(f => ({ ...f, ...patch }));
+
+  const waOn    = !!aud?.whatsapp_configured;
+  const classes = aud?.classes || [];
+
+  const loadAud     = () => getAudiences().then(r => setAud(r?.data || null)).catch(() => setAud(null));
+  const loadHistory = () => getCommunications().then(r => setHistory(arrOf(r))).catch(() => setHistory([]));
+  const loadEvents  = () => getEvents().then(r => setEvents(arrOf(r))).catch(() => setEvents([]));
+
+  useEffect(() => {
+    let dead = false;
+    (async () => {
+      setLoading(true);
+      try {
+        await Promise.all([loadAud(), loadHistory(), loadEvents()]);
+        const st = await getStudents({ per_page: 200, sort: "class" }).then(r => arrOf(r, "students")).catch(() => []);
+        if (!dead) setStudents(st);
+      } finally { if (!dead) setLoading(false); }
+    })();
+    return () => { dead = true; };
+  }, []);
+
+  const audCount = (a, classId) => {
+    if (a === "all_staff") return aud?.all_staff ?? 0;
+    if (a === "class_guardians") { const c = classes.find(c => String(c.id) === String(classId)); return c ? Number(c.students) : 0; }
+    return aud?.all_guardians ?? 0;
+  };
+  const channelsOf = f => [f.email && "email", f.whatsapp && "whatsapp"].filter(Boolean);
+
+  const submit = async () => {
+    const chans = channelsOf(form);
+    if (!form.body.trim())  return flash("Enter a message to send.");
+    if (chans.length === 0) return flash("Pick at least one channel (Email or WhatsApp).");
+    if (form.audience === "class_guardians" && !form.class_id) return flash("Pick a class for this audience.");
+    setSending(true);
+    try {
+      const r = await sendCommunication({
+        subject: form.subject, body: form.body, audience: form.audience,
+        class_id: form.audience === "class_guardians" ? form.class_id : "", channels: chans,
+      });
+      flash(r?.message || "Broadcast sent.");
+      setF({ subject:"", body:"" });
+      loadHistory();
+    } catch (e) { flash(e?.message || e?.data?.message || "Could not send the broadcast."); }
+    finally { setSending(false); }
+  };
+
+  const removeEvent = async ev => {
+    if (!window.confirm(`Delete event "${ev.title}"?`)) return;
+    try { await apiDeleteEvent(ev.id); flash("Event deleted."); loadEvents(); }
+    catch (e) { flash(e?.message || "Could not delete event."); }
+  };
+
+  const openPreview = async sid => {
+    setPreviewId(sid); setPreview(null);
+    if (!sid) return;
+    try { const r = await getParentPreview(sid); setPreview(r?.data || null); }
+    catch (e) { flash(e?.message || "Could not load preview."); }
+  };
+
+  const chTag = ch => ch.split(",").map(c => c === "whatsapp" ? "💬" : "📧").join(" ");
+  const naira = n => "₦" + Number(n || 0).toLocaleString();
 
   return (
     <div className="fi">
-      <Tabs tabs={[{id:"sms",label:"📱 SMS Notifications"},{id:"reminders",label:"⏰ Event Reminders"},{id:"parentportal",label:"👨‍👩‍👧 Parent Portal Preview"}]} active={tab} onChange={setTab}/>
+      <Tabs tabs={[{id:"broadcast",label:"📣 Broadcast"},{id:"reminders",label:"⏰ Event Reminders"},{id:"parentportal",label:"👨‍👩‍👧 Parent Preview"}]} active={tab} onChange={setTab}/>
       <div style={{marginTop:16}}>
+        {loading ? <Card style={{textAlign:"center",color:C.textMuted,padding:"44px"}}>Loading communications…</Card> : <>
 
-        {tab==="sms" && (
+        {/* ── BROADCAST ──────────────────────────────────────────────────── */}
+        {tab==="broadcast" && (
           <div>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:11}}>
-                <StatCard label="SMS Sent This Month"   value="2,847" color={C.sky}    icon="📱"/>
-                <StatCard label="Delivery Rate"         value="98.7%" color={C.accent} icon="✅"/>
-                <StatCard label="SMS Balance (Units)"   value="4,200" color={C.amber}  icon="💳"/>
-              </div>
-              <Btn variant="primary" onClick={()=>setSmsModal(true)}>📱 Send SMS</Btn>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:11,marginBottom:16}}>
+              <StatCard label="Guardians Reachable" value={aud?.all_guardians ?? 0}        color={C.sky}    icon="👨‍👩‍👧"/>
+              <StatCard label="Staff Reachable"      value={aud?.all_staff ?? 0}            color={C.accent} icon="🧑‍🏫"/>
+              <StatCard label="WhatsApp"             value={waOn?"Connected":"Email only"}  sub={waOn?"Twilio ready":"Add Twilio config"} color={waOn?C.teal:C.amber} icon="💬"/>
             </div>
-            <Card style={{padding:0}}>
-              <table style={{width:"100%",borderCollapse:"collapse"}}>
-                <thead><tr style={{background:"#F8FAFC"}}>{["Recipient","Message Preview","Sent","Delivered","Date","Status"].map(h=><th key={h} style={{padding:"10px 13px",textAlign:"left",fontSize:10,fontWeight:700,color:C.textMuted,textTransform:"uppercase"}}>{h}</th>)}</tr></thead>
-                <tbody>
-                  {smsLogs.map(s=>(
-                    <tr key={s.id} style={{borderBottom:`1px solid ${C.border}`}} onMouseEnter={e=>e.currentTarget.style.background="#F8FAFC"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                      <td style={{padding:"10px 13px",fontSize:12,fontWeight:600}}>{s.recipient}</td>
-                      <td style={{padding:"10px 13px",fontSize:12,color:C.textMid,maxWidth:240}}><div style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.message}</div></td>
-                      <td style={{padding:"10px 13px",fontSize:12,fontWeight:600}}>{s.sent}</td>
-                      <td style={{padding:"10px 13px",fontSize:12,fontWeight:600,color:C.accentDark}}>{s.delivered}</td>
-                      <td style={{padding:"10px 13px",fontSize:11,color:C.textMuted}}>{s.date}</td>
-                      <td style={{padding:"10px 13px"}}><Badge color="green" size="sm">{s.status}</Badge></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </Card>
+
+            <div style={{display:"grid",gridTemplateColumns:"minmax(0,1.3fr) minmax(0,1fr)",gap:14,alignItems:"start"}}>
+              <Card>
+                <div style={{fontSize:14,fontWeight:800,marginBottom:14}}>Compose a message</div>
+                <div style={{display:"grid",gridTemplateColumns:form.audience==="class_guardians"?"1fr 1fr":"1fr",gap:11,marginBottom:11}}>
+                  <Sel label="Audience" value={form.audience} onChange={v=>setF({audience:v})}
+                       options={Object.entries(AUD_LABELS).map(([value,label])=>({value,label}))}/>
+                  {form.audience==="class_guardians" && (
+                    <Sel label="Class" value={form.class_id} onChange={v=>setF({class_id:v})}
+                         options={[{value:"",label:"Select class…"},...classes.map(c=>({value:String(c.id),label:`${c.name} (${c.students})`}))]}/>
+                  )}
+                </div>
+                <div style={{marginBottom:11}}>
+                  <Input label="Subject (optional)" value={form.subject} onChange={v=>setF({subject:v})} placeholder="e.g. 2nd Term Fees Reminder"/>
+                </div>
+                <label style={{fontSize:11,fontWeight:700,color:C.textMid,letterSpacing:".4px",textTransform:"uppercase"}}>Message</label>
+                <textarea value={form.body} onChange={e=>setF({body:e.target.value})} placeholder="Type your message to parents or staff…"
+                  style={{width:"100%",minHeight:120,marginTop:4,padding:"10px 12px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,fontFamily:"inherit",outline:"none",resize:"vertical",boxSizing:"border-box"}}/>
+
+                <div style={{display:"flex",alignItems:"center",gap:18,margin:"14px 0 4px",flexWrap:"wrap"}}>
+                  <div style={{fontSize:11,fontWeight:700,color:C.textMid,letterSpacing:".4px",textTransform:"uppercase"}}>Channels</div>
+                  <label style={{display:"flex",alignItems:"center",gap:7,fontSize:13,cursor:"pointer"}}>
+                    <input type="checkbox" checked={form.email} onChange={e=>setF({email:e.target.checked})}/> 📧 Email
+                  </label>
+                  <label style={{display:"flex",alignItems:"center",gap:7,fontSize:13,cursor:waOn?"pointer":"not-allowed",opacity:waOn?1:.5}} title={waOn?"":"Add config/twilio.php on the server to enable WhatsApp"}>
+                    <input type="checkbox" checked={form.whatsapp} disabled={!waOn} onChange={e=>setF({whatsapp:e.target.checked})}/> 💬 WhatsApp
+                  </label>
+                </div>
+                {!waOn && <div style={{fontSize:11.5,color:C.textMuted,marginBottom:4}}>WhatsApp is off until Twilio is configured on the server. Email works now.</div>}
+
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:14,borderTop:`1px solid ${C.border}`,paddingTop:14}}>
+                  <div style={{fontSize:12.5,color:C.textMid}}>Sending to <b style={{color:C.text}}>{audCount(form.audience,form.class_id)}</b> recipient(s)</div>
+                  <Btn variant="primary" onClick={submit} disabled={sending}>{sending?"Sending…":"📤 Send Broadcast"}</Btn>
+                </div>
+              </Card>
+
+              <Card style={{padding:"16px 18px"}}>
+                <div style={{fontSize:13,fontWeight:800,marginBottom:12}}>Recent broadcasts</div>
+                {history.length===0 ? (
+                  <div style={{fontSize:12.5,color:C.textMuted,padding:"20px 0",textAlign:"center"}}>No messages sent yet.</div>
+                ) : (
+                  <div style={{display:"flex",flexDirection:"column",gap:10,maxHeight:430,overflowY:"auto"}}>
+                    {history.map(m=>(
+                      <div key={m.id} style={{border:`1px solid ${C.border}`,borderRadius:10,padding:"10px 12px"}}>
+                        <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center",marginBottom:4}}>
+                          <div style={{fontSize:12.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{m.subject||"(no subject)"}</div>
+                          <Badge color={m.kind==="reminder"?"amber":"blue"} size="sm">{m.kind}</Badge>
+                        </div>
+                        <div style={{fontSize:11.5,color:C.textMid,marginBottom:6,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>{m.body}</div>
+                        <div style={{display:"flex",gap:10,flexWrap:"wrap",fontSize:11,color:C.textMuted}}>
+                          <span>{chTag(m.channels)}</span>
+                          <span>{AUD_LABELS[m.audience]||m.audience}{m.class_name?` · ${m.class_name}`:""}</span>
+                          <span style={{color:C.accentDark}}>✓ {Number(m.sent_email)+Number(m.sent_whatsapp)} sent</span>
+                          {Number(m.failed)>0 && <span style={{color:C.coral}}>✗ {m.failed} failed</span>}
+                          {Number(m.skipped)>0 && <span>– {m.skipped} skipped</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
+            </div>
           </div>
         )}
 
+        {/* ── EVENT REMINDERS ────────────────────────────────────────────── */}
         {tab==="reminders" && (
           <div>
-            <div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}><Btn variant="primary">+ Add Reminder</Btn></div>
-            <div style={{display:"flex",flexDirection:"column",gap:11}}>
-              {reminders.map(r=>(
-                <Card key={r.id} style={{display:"flex",gap:14,alignItems:"center"}}>
-                  <div style={{width:46,height:46,borderRadius:11,background:r.status==="Sent"?C.accentLight:r.status==="Scheduled"?C.skyLight:C.amberLight,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>⏰</div>
-                  <div style={{flex:1}}>
-                    <div style={{fontSize:13,fontWeight:700}}>{r.event}</div>
-                    <div style={{fontSize:11,color:C.textMuted,marginTop:3}}>Event: {r.date} · Send reminder: {r.sendDate}</div>
-                    <div style={{fontSize:11,color:C.textMid,marginTop:2}}>To: {r.audience}</div>
-                  </div>
-                  <Badge color={r.status==="Sent"?"green":r.status==="Scheduled"?"blue":"amber"} size="sm">{r.status}</Badge>
-                  <div style={{display:"flex",gap:7}}><Btn size="sm" variant="ghost">✏️</Btn>{r.status!=="Sent"&&<Btn size="sm" variant="secondary">Send Now</Btn>}</div>
-                </Card>
-              ))}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <div style={{fontSize:13,color:C.textMid}}>Create events, then send a reminder to the right audience over email or WhatsApp.</div>
+              <Btn variant="primary" onClick={()=>setEvtModal({})}>+ Add Event</Btn>
             </div>
+            {events.length===0 ? (
+              <Card style={{textAlign:"center",padding:"48px 16px"}}><div style={{fontSize:34,marginBottom:10}}>⏰</div><div style={{fontSize:15,fontWeight:700,marginBottom:6}}>No events yet</div><div style={{fontSize:13,color:C.textMid}}>Add an event to schedule reminders.</div></Card>
+            ) : (
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:13}}>
+                {events.map(ev=>{
+                  const past = new Date(ev.event_date) < new Date(new Date().toDateString());
+                  return (
+                  <Card key={ev.id}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+                      <div>
+                        <div style={{fontSize:14,fontWeight:700}}>{ev.title}</div>
+                        <div style={{fontSize:11.5,color:C.textMuted,marginTop:2}}>📅 {new Date(ev.event_date).toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short",year:"numeric"})}</div>
+                      </div>
+                      <Badge color={past?"gray":"green"} size="sm">{past?"Past":"Upcoming"}</Badge>
+                    </div>
+                    {ev.description && <div style={{fontSize:12.5,color:C.textMid,marginBottom:10,display:"-webkit-box",WebkitLineClamp:3,WebkitBoxOrient:"vertical",overflow:"hidden"}}>{ev.description}</div>}
+                    <div style={{fontSize:11.5,color:C.textMuted,marginBottom:10}}>👥 {AUD_LABELS[ev.audience]||ev.audience}{ev.class_name?` · ${ev.class_name}`:""}</div>
+                    {ev.reminder_sent_at && <div style={{fontSize:11,color:C.accentDark,marginBottom:10}}>✓ Reminder sent {new Date(ev.reminder_sent_at).toLocaleDateString("en-GB")}</div>}
+                    <div style={{display:"flex",gap:8,borderTop:`1px solid ${C.border}`,paddingTop:11}}>
+                      <Btn size="sm" variant="primary" onClick={()=>setRemindFor(ev)}>📤 Send Reminder</Btn>
+                      <Btn size="sm" variant="secondary" onClick={()=>setEvtModal(ev)}>Edit</Btn>
+                      <Btn size="sm" variant="ghost" onClick={()=>removeEvent(ev)}>Delete</Btn>
+                    </div>
+                  </Card>
+                );})}
+              </div>
+            )}
           </div>
         )}
 
+        {/* ── PARENT PORTAL PREVIEW ──────────────────────────────────────── */}
         {tab==="parentportal" && (
           <div>
-            <div style={{padding:"11px 14px",borderRadius:10,background:C.amberLight,fontSize:12,color:"#92400E",fontWeight:600,marginBottom:16}}>👁 This is a preview of what parents see when they log into their portal.</div>
-            {/* Simulated parent portal */}
-            <div style={{border:`2px solid ${C.border}`,borderRadius:14,overflow:"hidden",maxWidth:680,margin:"0 auto"}}>
-              <div style={{background:C.navy,padding:"14px 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div style={{color:"#fff",fontSize:14,fontWeight:700}}>Parent Portal — Mrs. Grace Okonkwo</div>
-                <div style={{color:"#8DA4C0",fontSize:11}}>Viewing: Amara Okonkwo · JSS 3A</div>
+            <Card style={{marginBottom:14}}>
+              <div style={{display:"flex",gap:12,alignItems:"flex-end",flexWrap:"wrap"}}>
+                <Sel label="Preview a student's parent view" value={previewId} onChange={openPreview} style={{minWidth:280}}
+                     options={[{value:"",label:"Select a student…"},...students.map(s=>({value:String(s.id),label:`${[s.first_name,s.last_name].filter(Boolean).join(" ")} — ${s.class_name||s.student_id}`}))]}/>
+                <div style={{fontSize:12,color:C.textMuted,paddingBottom:8}}>A read-only snapshot of what a parent sees for their child.</div>
               </div>
-              <div style={{padding:"18px 20px",background:"#F8FAFC",display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:11,marginBottom:2}}>
-                {[["Avg Score","78%",C.accent,"📊"],["Attendance","94%",C.sky,"✅"],["Fee Balance","₦0",C.accentDark,"💳"],["Rank","3rd / 42",C.purple,"🏆"]].map(([l,v,c,ic])=>(
-                  <div key={l} style={{padding:"11px 13px",background:"#fff",borderRadius:10,border:`1px solid ${C.border}`,textAlign:"center"}}>
-                    <div style={{fontSize:16,marginBottom:4}}>{ic}</div>
-                    <div style={{fontSize:17,fontWeight:700,color:c}}>{v}</div>
-                    <div style={{fontSize:10,color:C.textMuted,marginTop:2}}>{l}</div>
+            </Card>
+            {!previewId ? (
+              <Card style={{textAlign:"center",padding:"48px 16px"}}><div style={{fontSize:34,marginBottom:10}}>👨‍👩‍👧</div><div style={{fontSize:15,fontWeight:700,marginBottom:6}}>Select a student above</div><div style={{fontSize:13,color:C.textMid}}>See their guardian, attendance, results and fee summary.</div></Card>
+            ) : !preview ? (
+              <Card style={{textAlign:"center",color:C.textMuted,padding:"40px"}}>Loading preview…</Card>
+            ) : (
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:13}}>
+                <Card>
+                  <div style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:".4px",marginBottom:10}}>Student</div>
+                  <div style={{display:"flex",gap:11,alignItems:"center",marginBottom:12}}>
+                    <Avatar initials={(preview.student.name||"?").split(" ").map(x=>x[0]).slice(0,2).join("")} size={46}/>
+                    <div><div style={{fontSize:14,fontWeight:700}}>{preview.student.name}</div><div style={{fontSize:11.5,color:C.textMuted}}>{preview.student.class_name} · {preview.student.student_id}</div></div>
                   </div>
-                ))}
-              </div>
-              <div style={{padding:"14px 20px",background:"#fff"}}>
-                <div style={{fontSize:12,fontWeight:700,marginBottom:11}}>Recent Results</div>
-                {SUBJECTS.slice(0,4).map((s,i)=>(
-                  <div key={s} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:`1px solid ${C.border}`,fontSize:12}}>
-                    <span style={{fontWeight:500}}>{s}</span>
-                    <div style={{display:"flex",gap:11,alignItems:"center"}}>
-                      <span style={{fontWeight:700,color:65+i*5>=70?C.accentDark:C.amber}}>{65+i*5}%</span>
-                      <Badge color={65+i*5>=70?"green":"amber"} size="sm">{"ABCDE"[Math.floor((100-(65+i*5))/10)]}{"123456789"[Math.floor((100-(65+i*5))/10)]}</Badge>
+                  <div style={{fontSize:12.5,color:C.textMid,lineHeight:1.9}}>
+                    <div><b style={{color:C.text}}>Guardian:</b> {preview.student.guardian_name||"—"}</div>
+                    <div><b style={{color:C.text}}>Email:</b> {preview.student.guardian_email||"—"}</div>
+                    <div><b style={{color:C.text}}>Phone:</b> {preview.student.guardian_phone||"—"}</div>
+                  </div>
+                </Card>
+                <Card>
+                  <div style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:".4px",marginBottom:10}}>Attendance {preview.term?.name?`· ${preview.term.name}`:""}</div>
+                  <div style={{fontSize:30,fontWeight:800,color:C.sky}}>{preview.attendance.rate!=null?`${preview.attendance.rate}%`:"—"}</div>
+                  <div style={{fontSize:12.5,color:C.textMid,marginTop:4}}>Present {preview.attendance.present} of {preview.attendance.total} recorded days</div>
+                </Card>
+                <Card>
+                  <div style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:".4px",marginBottom:10}}>Fees</div>
+                  <div style={{fontSize:12.5,color:C.textMid,lineHeight:2}}>
+                    <div style={{display:"flex",justifyContent:"space-between"}}><span>Invoiced</span><b style={{color:C.text}}>{naira(preview.fees.invoiced)}</b></div>
+                    <div style={{display:"flex",justifyContent:"space-between"}}><span>Paid</span><b style={{color:C.accentDark}}>{naira(preview.fees.paid)}</b></div>
+                    <div style={{display:"flex",justifyContent:"space-between",borderTop:`1px solid ${C.border}`,paddingTop:6,marginTop:4}}><span>Balance</span><b style={{color:Number(preview.fees.balance)>0?C.coral:C.text}}>{naira(preview.fees.balance)}</b></div>
+                  </div>
+                </Card>
+                <Card style={{gridColumn:"1 / -1"}}>
+                  <div style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:".4px",marginBottom:10}}>Results {preview.term?.name?`· ${preview.term.name}`:""}</div>
+                  {preview.subjects.length===0 ? <div style={{fontSize:12.5,color:C.textMuted}}>No scores recorded for this term yet.</div> : (
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:8}}>
+                      {preview.subjects.map((s,i)=>(
+                        <div key={i} style={{display:"flex",justifyContent:"space-between",border:`1px solid ${C.border}`,borderRadius:8,padding:"7px 11px",fontSize:12.5}}>
+                          <span style={{color:C.textMid,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.subject}</span><b>{Math.round(Number(s.total))}</b>
+                        </div>
+                      ))}
                     </div>
-                  </div>
-                ))}
-                <div style={{display:"flex",gap:9,marginTop:14}}>
-                  <Btn size="sm" variant="secondary" style={{flex:1,justifyContent:"center"}}>💳 Pay Fees</Btn>
-                  <Btn size="sm" variant="primary"  style={{flex:1,justifyContent:"center"}}>💬 Message Teacher</Btn>
-                </div>
+                  )}
+                </Card>
               </div>
-            </div>
+            )}
           </div>
         )}
+        </>}
       </div>
 
-      {smsModal&&<Modal title="📱 Send SMS Notification" onClose={()=>setSmsModal(false)} width={500}>
-        <div style={{display:"flex",flexDirection:"column",gap:12}}>
-          <Sel label="Send To" value="all-parents" onChange={()=>{}} options={[{value:"all-parents",label:"All Parents"},{value:"all-students",label:"All Students"},{value:"class-parents",label:"Specific Class Parents"},{value:"debtors",label:"Owing Parents Only"},{value:"individual",label:"Individual"}]}/>
-          <Sel label="Class (if applicable)" value="all" onChange={()=>{}} options={[{value:"all",label:"All Classes"},...CLASSES.map(c=>({value:c,label:c}))]}/>
-          <div>
-            <label style={{fontSize:11,fontWeight:700,color:C.textMid,textTransform:"uppercase",letterSpacing:".4px",display:"block",marginBottom:4}}>Message</label>
-            <textarea placeholder="Type your SMS message here… (max 160 characters)" maxLength={160} style={{width:"100%",padding:"9px 11px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,minHeight:80,resize:"none",outline:"none",fontFamily:"Sora,sans-serif"}} onFocus={e=>e.target.style.borderColor=C.accent} onBlur={e=>e.target.style.borderColor=C.border}/>
-            <div style={{fontSize:10,color:C.textMuted,textAlign:"right",marginTop:3}}>0/160 characters · Est. recipients: 1,284</div>
-          </div>
-          <div style={{display:"flex",gap:9,justifyContent:"flex-end"}}><Btn variant="secondary" onClick={()=>setSmsModal(false)}>Cancel</Btn><Btn variant="primary" onClick={()=>setSmsModal(false)}>📱 Send SMS</Btn></div>
-        </div>
-      </Modal>}
+      {evtModal && <EventModal event={evtModal} classes={classes} waOn={waOn}
+        onClose={()=>setEvtModal(null)} onDone={()=>{setEvtModal(null); loadEvents();}} flash={flash}/>}
+      {remindFor && <ReminderModal event={remindFor} waOn={waOn}
+        onClose={()=>setRemindFor(null)} onDone={()=>{setRemindFor(null); loadEvents(); loadHistory();}} flash={flash}/>}
+      {toast && <div style={{position:"fixed",bottom:26,right:26,zIndex:2000,background:C.navy,color:"#fff",padding:"11px 18px",borderRadius:11,fontSize:12,fontWeight:600,maxWidth:360}}>{toast}</div>}
     </div>
   );
 };
+
+// Create / edit a school event.
+const EventModal = ({ event, classes, onClose, onDone, flash }) => {
+  const isEdit = !!event.id;
+  const [f, setF] = useState({
+    title: event.title || "", description: event.description || "",
+    event_date: event.event_date ? String(event.event_date).slice(0,10) : "",
+    audience: event.audience || "all_guardians", class_id: event.class_id ? String(event.class_id) : "",
+  });
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    if (!f.title.trim() || !f.event_date) return flash("Event title and date are required.");
+    if (f.audience==="class_guardians" && !f.class_id) return flash("Pick a class for this audience.");
+    setSaving(true);
+    try {
+      const payload = { ...f, class_id: f.audience==="class_guardians" ? f.class_id : "" };
+      if (isEdit) await updateEvent(event.id, payload); else await apiSaveEvent(payload);
+      flash(isEdit?"Event updated.":"Event created."); onDone();
+    } catch (e) { flash(e?.message || e?.data?.message || "Could not save event."); setSaving(false); }
+  };
+  return (
+    <Modal title={isEdit?"Edit Event":"Add Event"} onClose={onClose} width={520}>
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        <Input label="Event title" value={f.title} onChange={v=>setF(s=>({...s,title:v}))} placeholder="e.g. End of Term Exams"/>
+        <div style={{display:"grid",gridTemplateColumns:f.audience==="class_guardians"?"1fr 1fr":"1fr",gap:11}}>
+          <Input label="Date" type="date" value={f.event_date} onChange={v=>setF(s=>({...s,event_date:v}))}/>
+          {f.audience==="class_guardians" && (
+            <Sel label="Class" value={f.class_id} onChange={v=>setF(s=>({...s,class_id:v}))}
+                 options={[{value:"",label:"Select class…"},...classes.map(c=>({value:String(c.id),label:c.name}))]}/>
+          )}
+        </div>
+        <Sel label="Reminder audience" value={f.audience} onChange={v=>setF(s=>({...s,audience:v}))}
+             options={Object.entries(AUD_LABELS).map(([value,label])=>({value,label}))}/>
+        <div>
+          <label style={{fontSize:11,fontWeight:700,color:C.textMid,letterSpacing:".4px",textTransform:"uppercase"}}>Description (optional)</label>
+          <textarea value={f.description} onChange={e=>setF(s=>({...s,description:e.target.value}))} placeholder="Details included in the reminder message…"
+            style={{width:"100%",minHeight:84,marginTop:4,padding:"10px 12px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,fontFamily:"inherit",outline:"none",resize:"vertical",boxSizing:"border-box"}}/>
+        </div>
+        <div style={{display:"flex",justifyContent:"flex-end",gap:9,marginTop:4}}>
+          <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
+          <Btn variant="primary" onClick={save} disabled={saving}>{saving?"Saving…":isEdit?"Save Changes":"Create Event"}</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
+// Pick channels and send a reminder for an event.
+const ReminderModal = ({ event, waOn, onClose, onDone, flash }) => {
+  const [email, setEmail] = useState(true);
+  const [whatsapp, setWhatsapp] = useState(false);
+  const [sending, setSending] = useState(false);
+  const send = async () => {
+    const chans = [email && "email", whatsapp && "whatsapp"].filter(Boolean);
+    if (chans.length===0) return flash("Pick at least one channel.");
+    setSending(true);
+    try { const r = await sendEventReminder(event.id, { channels: chans }); flash(r?.message || "Reminder sent."); onDone(); }
+    catch (e) { flash(e?.message || e?.data?.message || "Could not send reminder."); setSending(false); }
+  };
+  return (
+    <Modal title={`Send reminder: ${event.title}`} onClose={onClose} width={460}>
+      <div style={{fontSize:13,color:C.textMid,marginBottom:14}}>
+        A reminder for <b style={{color:C.text}}>{event.title}</b> ({new Date(event.event_date).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}) will be sent to <b style={{color:C.text}}>{AUD_LABELS[event.audience]||event.audience}</b>{event.class_name?` · ${event.class_name}`:""}.
+      </div>
+      <div style={{display:"flex",gap:18,marginBottom:16,flexWrap:"wrap"}}>
+        <label style={{display:"flex",alignItems:"center",gap:7,fontSize:13,cursor:"pointer"}}><input type="checkbox" checked={email} onChange={e=>setEmail(e.target.checked)}/> 📧 Email</label>
+        <label style={{display:"flex",alignItems:"center",gap:7,fontSize:13,cursor:waOn?"pointer":"not-allowed",opacity:waOn?1:.5}} title={waOn?"":"Twilio not configured"}><input type="checkbox" checked={whatsapp} disabled={!waOn} onChange={e=>setWhatsapp(e.target.checked)}/> 💬 WhatsApp</label>
+      </div>
+      <div style={{display:"flex",justifyContent:"flex-end",gap:9}}>
+        <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" onClick={send} disabled={sending}>{sending?"Sending…":"📤 Send Reminder"}</Btn>
+      </div>
+    </Modal>
+  );
+};
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // 11. REPORTS & ANALYTICS (enhanced)
 // ═══════════════════════════════════════════════════════════════════════════════
 const Analytics = () => {
-  const [tab, setTab] = useState("performance");
+  const [tab, setTab]     = useState("performance");
+  const [terms, setTerms] = useState([]);
+  const [termId, setTermId] = useState(null);
+  const [perf, setPerf]   = useState(null);
+  const [att, setAtt]     = useState(null);
+  const [fin, setFin]     = useState(null);
+  const [adm, setAdm]     = useState(null);
+  const [loading, setLoading] = useState(false);
+  const money = n => { n = Number(n||0); return n>=1e6 ? "₦"+(n/1e6).toFixed(1)+"M" : n>=1e3 ? "₦"+(n/1e3).toFixed(0)+"k" : "₦"+n.toLocaleString(); };
+  const unwrap = r => r?.data ?? r;
 
-  const BarChart = ({ data, color = C.accent, height = 100 }) => {
-    const max = Math.max(...data.map(d => d.value));
+  useEffect(() => {
+    getTerms().then(r => { const ts = arrOf(r); setTerms(ts); const cur = ts.find(t=>t.is_current)||ts[0]; setTermId(cur?.id ?? null); }).catch(()=>{});
+  }, []);
+
+  useEffect(() => {
+    if (termId===null && tab!=="admissions") return;
+    setLoading(true);
+    const done = () => setLoading(false);
+    if (tab==="performance") getPerfAnalytics(termId).then(r=>setPerf(unwrap(r))).catch(()=>setPerf(null)).finally(done);
+    else if (tab==="attendance") getAttAnalytics(termId).then(r=>setAtt(unwrap(r))).catch(()=>setAtt(null)).finally(done);
+    else if (tab==="finance") getFinanceAnalytics(termId).then(r=>setFin(unwrap(r))).catch(()=>setFin(null)).finally(done);
+    else if (tab==="admissions") getAdmissionAnalytics().then(r=>setAdm(unwrap(r))).catch(()=>setAdm(null)).finally(done);
+  }, [tab, termId]);
+
+  const BarChart = ({ data, color = C.accent, height = 120, fmt }) => {
+    const rows = (data||[]).filter(d => d && d.value!=null);
+    if (!rows.length) return <div style={{fontSize:12,color:C.textMuted,padding:"24px 0",textAlign:"center"}}>No data yet.</div>;
+    const max = Math.max(...rows.map(d => Number(d.value))) || 1;
     return (
       <div style={{ display:"flex", alignItems:"flex-end", gap:8, height }}>
-        {data.map((d, i) => (
-          <div key={i} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
-            <div style={{ fontSize:10, fontWeight:600, color:C.textMid }}>{d.value}{d.unit||""}</div>
-            <div style={{ width:"100%", background:color, borderRadius:"4px 4px 0 0", height:Math.round((d.value/max)*(height-24)) }}/>
-            <div style={{ fontSize:9, color:C.textMuted, textAlign:"center", lineHeight:1.2 }}>{d.label}</div>
+        {rows.map((d, i) => (
+          <div key={i} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:4, minWidth:0 }}>
+            <div style={{ fontSize:10, fontWeight:600, color:C.textMid }}>{fmt?fmt(d.value):d.value}{d.unit||""}</div>
+            <div style={{ width:"100%", background:color, borderRadius:"4px 4px 0 0", height:Math.max(2,Math.round((Number(d.value)/max)*(height-24))) }}/>
+            <div style={{ fontSize:9, color:C.textMuted, textAlign:"center", lineHeight:1.2, overflow:"hidden", textOverflow:"ellipsis", maxWidth:"100%", whiteSpace:"nowrap" }}>{d.label}</div>
           </div>
         ))}
       </div>
     );
   };
 
+  const Bars = ({ rows, max, fmt, colorFor }) => {
+    if (!rows || !rows.length) return <div style={{fontSize:12,color:C.textMuted,padding:"16px 0"}}>No data yet.</div>;
+    const m = max || Math.max(1, ...rows.map(r=>Number(r.value)||0));
+    return rows.map((r,i)=>{const pct=Math.round((Number(r.value)||0)/m*100);const col=colorFor?colorFor(Number(r.value)):C.accent;return(
+      <div key={i} style={{marginBottom:9}}>
+        <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3}}><span style={{fontWeight:600,textTransform:"capitalize"}}>{r.label}</span><span style={{color:C.textMid}}>{fmt?fmt(r.value):r.value}</span></div>
+        <div style={{height:6,borderRadius:99,background:C.border}}><div style={{height:6,borderRadius:99,background:col,width:pct+"%"}}/></div>
+      </div>
+    );});
+  };
+
+  const findVal = (arr, label) => (arr||[]).find(s=>s.label===label)?.value ?? 0;
+
   return (
     <div className="fi">
-      <Tabs tabs={[{id:"performance",label:"📊 Student Performance"},{id:"attendance",label:"✅ Attendance Analytics"},{id:"finance",label:"💰 Financial Reports"},{id:"admissions",label:"🎓 Admission Stats"}]} active={tab} onChange={setTab}/>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+        <Tabs tabs={[{id:"performance",label:"📊 Student Performance"},{id:"attendance",label:"✅ Attendance Analytics"},{id:"finance",label:"💰 Financial Reports"},{id:"admissions",label:"🎓 Admission Stats"}]} active={tab} onChange={setTab}/>
+        {tab!=="admissions" && terms.length>0 && (
+          <Sel value={termId?String(termId):""} onChange={v=>setTermId(Number(v))} options={terms.map(t=>({value:String(t.id),label:t.name+(t.is_current?" (current)":"")}))} style={{width:190}}/>
+        )}
+      </div>
       <div style={{ marginTop:16 }}>
+        {loading && <Card style={{textAlign:"center",color:C.textMuted,padding:"20px"}}>Loading…</Card>}
 
-        {tab==="performance" && (
+        {tab==="performance" && perf && (
           <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12 }}>
-              <StatCard label="School Average"  value="68.4%" color={C.accent}  icon="📊"/>
-              <StatCard label="Top Scorer"       value="96%"   color={C.sky}     icon="🏆"/>
-              <StatCard label="Below 50% (At Risk)" value="47" color={C.coral}  icon="⚠️"/>
-              <StatCard label="Above 80% (Distinction)" value="128" color={C.accent} icon="⭐"/>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:12 }}>
+              <StatCard label="School Average" value={perf.summary?.school_average!=null?perf.summary.school_average+"%":"—"} color={C.accent} icon="📊"/>
+              <StatCard label="Top Overall" value={perf.summary?.top!=null?perf.summary.top+"%":"—"} color={C.sky} icon="🏆"/>
+              <StatCard label="At Risk (<50%)" value={perf.summary?.at_risk ?? 0} color={C.coral} icon="⚠️"/>
+              <StatCard label="Distinction (≥80%)" value={perf.summary?.distinction ?? 0} color={C.accentDark} icon="⭐"/>
             </div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
-              <Card>
-                <div style={{ fontSize:13, fontWeight:700, marginBottom:14 }}>Performance by Subject (School Average)</div>
-                <BarChart data={[{label:"Maths",value:72},{label:"English",value:78},{label:"Biology",value:65},{label:"Physics",value:61},{label:"Chemistry",value:58},{label:"History",value:74}]} color={C.accent}/>
-              </Card>
-              <Card>
-                <div style={{ fontSize:13, fontWeight:700, marginBottom:14 }}>Performance by Class</div>
-                <BarChart data={CLASSES.slice(0,6).map((c,i)=>({label:c,value:58+i*4}))} color={C.sky}/>
-              </Card>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))", gap:14 }}>
+              <Card><div style={{ fontSize:13, fontWeight:700, marginBottom:14 }}>Average by Subject</div><BarChart data={perf.by_subject} color={C.accent}/></Card>
+              <Card><div style={{ fontSize:13, fontWeight:700, marginBottom:14 }}>Average by Class</div><BarChart data={perf.by_class} color={C.sky}/></Card>
             </div>
             <Card>
               <div style={{ fontSize:13, fontWeight:700, marginBottom:14 }}>📋 Class Performance Rankings</div>
+              {(!perf.rankings||!perf.rankings.length) ? <div style={{fontSize:12,color:C.textMuted}}>No grades entered for this term yet.</div> : (
               <table style={{ width:"100%", borderCollapse:"collapse" }}>
-                <thead><tr style={{ background:"#F8FAFC" }}>{["Rank","Class","Avg Score","Top Student","No. Passed","No. Failed"].map(h=><th key={h} style={{ padding:"10px 13px", textAlign:"left", fontSize:10, fontWeight:700, color:C.textMuted, textTransform:"uppercase" }}>{h}</th>)}</tr></thead>
+                <thead><tr style={{ background:"#F8FAFC" }}>{["Rank","Class","Avg Score","Passed","Failed"].map(h=><th key={h} style={{ padding:"10px 13px", textAlign:"left", fontSize:10, fontWeight:700, color:C.textMuted, textTransform:"uppercase" }}>{h}</th>)}</tr></thead>
                 <tbody>
-                  {CLASSES.slice(0,6).map((cls,i)=>(
-                    <tr key={cls} style={{ borderBottom:`1px solid ${C.border}` }} onMouseEnter={e=>e.currentTarget.style.background="#F8FAFC"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                  {perf.rankings.map((r,i)=>(
+                    <tr key={i} style={{ borderBottom:`1px solid ${C.border}` }}>
                       <td style={{ padding:"10px 13px" }}><div style={{ width:26, height:26, borderRadius:"50%", background:i<3?[C.amber,C.borderDark,C.orange][i]+"22":"#F3F4F6", display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:700 }}>{i+1}</div></td>
-                      <td style={{ padding:"10px 13px", fontSize:13, fontWeight:700 }}>{cls}</td>
-                      <td style={{ padding:"10px 13px", fontSize:13, fontWeight:700, color:C.accentDark }}>{74-i*2}%</td>
-                      <td style={{ padding:"10px 13px", fontSize:12 }}>{STUDENTS[i%STUDENTS.length].name}</td>
-                      <td style={{ padding:"10px 13px", fontSize:12, color:C.accentDark, fontWeight:600 }}>{28-i}</td>
-                      <td style={{ padding:"10px 13px", fontSize:12, color:C.coral, fontWeight:600 }}>{2+i}</td>
+                      <td style={{ padding:"10px 13px", fontSize:13, fontWeight:700 }}>{r.class_name}</td>
+                      <td style={{ padding:"10px 13px", fontSize:13, fontWeight:700, color:C.accentDark }}>{r.avg!=null?r.avg+"%":"—"}</td>
+                      <td style={{ padding:"10px 13px", fontSize:12, color:C.accentDark, fontWeight:600 }}>{r.passed}</td>
+                      <td style={{ padding:"10px 13px", fontSize:12, color:C.coral, fontWeight:600 }}>{r.failed}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              )}
             </Card>
           </div>
         )}
 
-        {tab==="attendance" && (
+        {tab==="attendance" && att && (
           <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12 }}>
-              <StatCard label="Overall Rate"    value="94.2%" color={C.accent} icon="✅"/>
-              <StatCard label="Perfect Attendance" value="342" sub="Students" color={C.sky} icon="⭐"/>
-              <StatCard label="Chronic Absent"  value="28"    sub="> 5 absences" color={C.coral} icon="🔴"/>
-              <StatCard label="Avg Daily Present" value="1,208" color={C.purple} icon="👥"/>
-            </div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
-              <Card>
-                <div style={{ fontSize:13, fontWeight:700, marginBottom:14 }}>Daily Attendance — This Week</div>
-                <BarChart data={[{label:"Mon",value:94,unit:"%"},{label:"Tue",value:96,unit:"%"},{label:"Wed",value:88,unit:"%"},{label:"Thu",value:95,unit:"%"},{label:"Fri",value:97,unit:"%"}]} color={C.accent}/>
-              </Card>
-              <Card>
-                <div style={{ fontSize:13, fontWeight:700, marginBottom:14 }}>Attendance by Class (This Month)</div>
-                {CLASSES.slice(0,6).map((cls,i)=>{const pct=88+i;return(
-                  <div key={cls} style={{ marginBottom:9 }}>
-                    <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, marginBottom:3 }}><span style={{ fontWeight:600 }}>{cls}</span><span style={{ color:pct>=95?"green":pct>=85?C.amber:C.coral }}>{pct}%</span></div>
-                    <div style={{ height:5, borderRadius:99, background:C.border }}><div style={{ height:5, borderRadius:99, background:pct>=95?C.accent:pct>=85?C.amber:C.coral, width:pct+"%" }}/></div>
-                  </div>
-                );})}
-              </Card>
-            </div>
-          </div>
-        )}
-
-        {tab==="finance" && (
-          <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12 }}>
-              <StatCard label="Total Revenue"   value="₦21.3M" color={C.accent} icon="💰"/>
-              <StatCard label="Total Expenses"  value="₦4.95M" color={C.coral}  icon="💸"/>
-              <StatCard label="Net Surplus"      value="₦16.4M" color={C.accentDark} icon="📈"/>
-              <StatCard label="Fee Collection Rate" value="76%" color={C.sky}   icon="✅"/>
-            </div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
-              <Card>
-                <div style={{ fontSize:13, fontWeight:700, marginBottom:14 }}>Monthly Fee Collection</div>
-                <BarChart data={[{label:"Jan",value:3.2},{label:"Feb",value:4.1},{label:"Mar",value:2.8},{label:"Apr",value:3.9},{label:"May",value:4.4}]} color={C.accent}/>
-              </Card>
-              <Card>
-                <div style={{ fontSize:13, fontWeight:700, marginBottom:14 }}>Expense Breakdown</div>
-                {[["Salaries",65,C.coral],["Utilities",4,C.amber],["Maintenance",7,C.sky],["Events",5,C.purple],["Supplies",2,C.teal],["Other",17,C.textMid]].map(([l,p,c])=>(
-                  <div key={l} style={{ marginBottom:8 }}>
-                    <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, marginBottom:3 }}><span style={{ fontWeight:600 }}>{l}</span><span style={{ color:C.textMid }}>{p}%</span></div>
-                    <div style={{ height:5, borderRadius:99, background:C.border }}><div style={{ height:5, borderRadius:99, background:c, width:p+"%" }}/></div>
-                  </div>
-                ))}
-              </Card>
-            </div>
-          </div>
-        )}
-
-        {tab==="admissions" && (
-          <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12 }}>
-              <StatCard label="Applications (2026)" value="248"  color={C.sky}    icon="📋"/>
-              <StatCard label="Approved"             value="186"  color={C.accent} icon="✅"/>
-              <StatCard label="Rejection Rate"       value="12%"  color={C.amber}  icon="📊"/>
-              <StatCard label="Enrolled"             value="174"  color={C.purple} icon="🎓"/>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:12 }}>
+              <StatCard label="Overall Rate" value={att.overall_rate!=null?att.overall_rate+"%":"—"} color={C.accent} icon="✅"/>
+              <StatCard label="Records" value={(att.records||0).toLocaleString()} color={C.sky} icon="🗓"/>
+              <StatCard label="Present Marks" value={(att.present||0).toLocaleString()} color={C.purple} icon="👥"/>
+              <StatCard label="Chronic Absent (>5)" value={att.chronic_absent ?? 0} color={C.coral} icon="🔴"/>
             </div>
             <Card>
-              <div style={{ fontSize:13, fontWeight:700, marginBottom:14 }}>Applications per Class</div>
-              <BarChart data={[{label:"JSS 1",value:98},{label:"JSS 2",value:42},{label:"JSS 3",value:28},{label:"SSS 1",value:56},{label:"SSS 2",value:14},{label:"SSS 3",value:10}]} color={C.purple}/>
+              <div style={{ fontSize:13, fontWeight:700, marginBottom:14 }}>Attendance Rate by Class</div>
+              <Bars rows={att.by_class} max={100} fmt={v=>v+"%"} colorFor={v=>v>=95?C.accent:v>=85?C.amber:C.coral}/>
             </Card>
-            <Card>
-              <div style={{ fontSize:13, fontWeight:700, marginBottom:14 }}>Year-on-Year Enrollment Trend</div>
-              <div style={{ display:"flex", alignItems:"flex-end", gap:14, height:110, paddingBottom:4 }}>
-                {[{year:"2021/22",n:820},{year:"2022/23",n:940},{year:"2023/24",n:1060},{year:"2024/25",n:1180},{year:"2025/26",n:1284}].map((y,i)=>(
-                  <div key={y.year} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
-                    <div style={{ fontSize:11, fontWeight:700, color:C.textMid }}>{y.n.toLocaleString()}</div>
-                    <div style={{ width:"100%", background:i===4?C.accent:C.sky+"66", borderRadius:"5px 5px 0 0", height:Math.round(y.n/1284*86) }}/>
-                    <div style={{ fontSize:9, color:C.textMuted }}>{y.year}</div>
-                  </div>
-                ))}
-              </div>
-            </Card>
+          </div>
+        )}
+
+        {tab==="finance" && fin && (
+          <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:12 }}>
+              <StatCard label="Collected" value={money(fin.collected)} color={C.accent} icon="💰"/>
+              <StatCard label="Outstanding" value={money(fin.outstanding)} color={C.coral} icon="⏳"/>
+              <StatCard label="Expenses" value={money(fin.expenses)} color={C.amber} icon="💸"/>
+              <StatCard label="Net" value={money(fin.net)} color={C.accentDark} icon="📈"/>
+              <StatCard label="Collection Rate" value={fin.collection_rate!=null?fin.collection_rate+"%":"—"} color={C.sky} icon="✅"/>
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))", gap:14 }}>
+              <Card><div style={{ fontSize:13, fontWeight:700, marginBottom:14 }}>Collection by Term</div><BarChart data={fin.by_term} color={C.accent} fmt={money}/></Card>
+              <Card><div style={{ fontSize:13, fontWeight:700, marginBottom:14 }}>Expense Breakdown</div><Bars rows={fin.by_category} fmt={money}/></Card>
+            </div>
+          </div>
+        )}
+
+        {tab==="admissions" && adm && (
+          <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:12 }}>
+              <StatCard label="Applications" value={adm.total ?? 0} color={C.sky} icon="📋"/>
+              <StatCard label="Approved" value={findVal(adm.by_status,"approved")} color={C.accent} icon="✅"/>
+              <StatCard label="Pending" value={findVal(adm.by_status,"pending")} color={C.amber} icon="⏳"/>
+              <StatCard label="Enrolled Students" value={adm.enrolled ?? 0} color={C.purple} icon="🎓"/>
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))", gap:14 }}>
+              <Card><div style={{ fontSize:13, fontWeight:700, marginBottom:14 }}>Applications by Class</div><BarChart data={adm.by_class} color={C.purple}/></Card>
+              <Card><div style={{ fontSize:13, fontWeight:700, marginBottom:14 }}>By Status</div><Bars rows={adm.by_status} colorFor={()=>C.sky}/></Card>
+            </div>
           </div>
         )}
       </div>
@@ -7217,10 +7785,12 @@ const Login = ({ onSuccess }) => {
 // STUDENT PORTAL  — exam taking with saved, auto-scored submissions
 // ═══════════════════════════════════════════════════════════════════════════════
 const StudentPortal = ({ user, school, onLogout }) => {
-  const [tab,        setTab]        = useState("exams");   // exams | results
+  const [tab,        setTab]        = useState("exams");   // exams | results | assignments
   const [view,       setView]       = useState("list");    // list | take
   const [exams,      setExams]      = useState([]);
   const [results,    setResults]    = useState([]);
+  const [assignments,setAssignments]= useState([]);
+  const [submitAsg,  setSubmitAsg]  = useState(null);      // assignment being submitted
   const [reviewing,  setReviewing]  = useState(null);      // { submission, questions } corrections view
   const [reviewBusy, setReviewBusy] = useState(false);
   const [loading,    setLoading]    = useState(true);
@@ -7237,7 +7807,8 @@ const StudentPortal = ({ user, school, onLogout }) => {
 
   const loadExams   = () => { setLoading(true); getMyExams().then(r => setExams(arrOf(r))).catch(() => setExams([])).finally(() => setLoading(false)); };
   const loadResults = () => getMyResults().then(r => setResults(arrOf(r))).catch(() => setResults([]));
-  useEffect(() => { loadExams(); loadResults(); }, []);
+  const loadAssignments = () => getMyOnlineAssignments().then(r => setAssignments(arrOf(r))).catch(() => setAssignments([]));
+  useEffect(() => { loadExams(); loadResults(); loadAssignments(); }, []);
 
   const openReview = async (subId) => {
     setReviewBusy(true);
@@ -7416,7 +7987,7 @@ const StudentPortal = ({ user, school, onLogout }) => {
       {header}
       <div style={{ maxWidth:920, margin:"0 auto", padding:22 }}>
         <div style={{ display:"flex", gap:8, marginBottom:18 }}>
-          {[["exams","📝 My Exams"],["results","📊 My Results"]].map(([id,l]) => (
+          {[["exams","📝 My Exams"],["results","📊 My Results"],["assignments","📚 Assignments"]].map(([id,l]) => (
             <button key={id} onClick={() => { setTab(id); setReviewing(null); }} style={{ padding:"8px 16px", borderRadius:9, border:`1px solid ${tab===id?C.accent:C.border}`, background:tab===id?C.accentLight:C.surface, color:tab===id?C.accentDark:C.textMid, fontSize:13, fontWeight:600, cursor:"pointer" }}>{l}</button>
           ))}
         </div>
@@ -7515,9 +8086,67 @@ const StudentPortal = ({ user, school, onLogout }) => {
             ))}
           </div>
         ))}
+
+        {tab==="assignments" && (assignments.length===0 ? (
+          <Card style={{ textAlign:"center", padding:"48px 16px" }}><div style={{ fontSize:34, marginBottom:10 }}>📚</div><div style={{ fontSize:15, fontWeight:700, marginBottom:6 }}>No assignments</div><div style={{ fontSize:13, color:C.textMid }}>Assignments from your teachers will appear here.</div></Card>
+        ) : (
+          <div style={{ display:"flex", flexDirection:"column", gap:11 }}>
+            {assignments.map(a=>{
+              const graded = a.marks!=null;
+              const over = a.due_date && new Date(a.due_date) < new Date(new Date().toDateString());
+              return (
+              <Card key={a.id}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:10 }}>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontSize:14, fontWeight:700 }}>{a.title}</div>
+                    <div style={{ fontSize:11, color:C.textMuted, marginTop:2 }}>{[a.subject_name, a.due_date?`Due ${a.due_date}`:null, `${a.max_marks} marks`].filter(Boolean).join(" · ")}</div>
+                    {a.instructions && <div style={{ fontSize:12, color:C.textMid, marginTop:6, whiteSpace:"pre-wrap" }}>{a.instructions}</div>}
+                    {a.resource_url && <a href={a.resource_url} target="_blank" rel="noreferrer" style={{ fontSize:12, color:C.accentDark, display:"inline-block", marginTop:4 }}>🔗 Resource</a>}
+                  </div>
+                  <div style={{ textAlign:"right" }}>
+                    {graded
+                      ? <><div style={{ fontSize:16, fontWeight:800, color:C.accentDark }}>{a.marks}/{a.max_marks}</div><Badge color="green" size="sm">Graded</Badge></>
+                      : a.submitted ? <Badge color="blue" size="sm">Submitted</Badge> : <Badge color={over?"red":"amber"} size="sm">{over?"Overdue":"Pending"}</Badge>}
+                  </div>
+                </div>
+                {graded && a.feedback && <div style={{ marginTop:8, padding:"8px 11px", borderRadius:8, background:C.accentLight, fontSize:12 }}><strong>Feedback:</strong> {a.feedback}</div>}
+                {!graded && <div style={{ display:"flex", justifyContent:"flex-end", marginTop:10 }}><Btn variant={a.submitted?"secondary":"primary"} size="sm" onClick={()=>setSubmitAsg(a)}>{a.submitted?"Edit Submission":"Submit"}</Btn></div>}
+              </Card>
+            );})}
+          </div>
+        ))}
       </div>
+      {submitAsg && <AsgSubmitModal assignment={submitAsg} onClose={()=>setSubmitAsg(null)} onDone={()=>{setSubmitAsg(null); loadAssignments();}} flash={flash}/>}
       {toast && <div style={{ position:"fixed", bottom:26, right:26, zIndex:2000, background:C.navy, color:"#fff", padding:"11px 18px", borderRadius:11, fontSize:12, fontWeight:600 }}>{toast}</div>}
     </div>
+  );
+};
+
+// Student's assignment submission (text answer + optional link).
+const AsgSubmitModal = ({ assignment, onClose, onDone, flash }) => {
+  const [content, setContent] = useState(assignment.content || "");
+  const [link, setLink]       = useState(assignment.link_url || "");
+  const [saving, setSaving]   = useState(false);
+  const submit = async () => {
+    if (!content.trim() && !link.trim()) { flash("Enter your answer or a link."); return; }
+    setSaving(true);
+    try { await submitMyAssignment({ assignment_id: assignment.id, content, link_url: link }); flash("Submitted."); onDone(); }
+    catch (e) { flash(e?.message || e?.data?.message || "Could not submit."); setSaving(false); }
+  };
+  return (
+    <Modal title={assignment.title} onClose={saving?()=>{}:onClose} width={540}>
+      {assignment.instructions && <div style={{ fontSize:12, color:C.textMid, marginBottom:12, whiteSpace:"pre-wrap" }}>{assignment.instructions}</div>}
+      <label style={{ fontSize:11, fontWeight:700, color:C.textMid, textTransform:"uppercase", letterSpacing:".4px", display:"block", marginBottom:4 }}>Your Answer</label>
+      <textarea value={content} onChange={e=>setContent(e.target.value)} placeholder="Type your answer…"
+        style={{ width:"100%", padding:"10px 13px", borderRadius:9, border:`1px solid ${C.border}`, fontSize:13, minHeight:140, resize:"vertical", outline:"none", fontFamily:"Sora,sans-serif", lineHeight:1.6, color:C.text }}/>
+      <div style={{ marginTop:12 }}>
+        <Input label="Attachment Link (optional)" value={link} onChange={setLink} placeholder="https://… (Google Doc, Drive, etc.)"/>
+      </div>
+      <div style={{ display:"flex", justifyContent:"flex-end", gap:8, marginTop:16 }}>
+        <Btn variant="secondary" onClick={onClose} disabled={saving}>Cancel</Btn>
+        <Btn variant="primary" onClick={submit} disabled={saving}>{saving?"Submitting…":"Submit"}</Btn>
+      </div>
+    </Modal>
   );
 };
 

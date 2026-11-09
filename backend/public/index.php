@@ -306,6 +306,12 @@ try {
     } elseif ($path === '/api/v1/my/exam-submit' && $method === 'POST') {
         StudentPortalController::submitExam(authGuard());
 
+    } elseif ($path === '/api/v1/my/assignments' && $method === 'GET') {
+        StudentPortalController::myAssignments(authGuard());
+
+    } elseif ($path === '/api/v1/my/assignment-submit' && $method === 'POST') {
+        StudentPortalController::submitAssignment(authGuard());
+
     // ── Inventory ─────────────────────────────────────────────────────────────
     } elseif ($path === '/api/v1/inventory' && $method === 'GET') {
         InventoryController::index(authGuard());
@@ -337,6 +343,116 @@ try {
 
     } elseif ($path === '/api/v1/hostel/visitors' && $method === 'POST') {
         HostelController::logVisitor(authGuard());
+
+    // ── Transport ───────────────────────────────────────────────────────────────
+    } elseif ($path === '/api/v1/transport/routes' && !$id && $method === 'GET') {
+        TransportController::routes(authGuard());
+
+    } elseif ($path === '/api/v1/transport/routes' && !$id && $method === 'POST') {
+        TransportController::saveRoute(authGuard());
+
+    } elseif ($path === '/api/v1/transport/routes' && $id && $method === 'PUT') {
+        TransportController::saveRoute(authGuard(), $id);
+
+    } elseif ($path === '/api/v1/transport/routes' && $id && $method === 'DELETE') {
+        TransportController::deleteRoute(authGuard(), $id);
+
+    } elseif ($path === '/api/v1/transport/assignments' && !$id && $method === 'GET') {
+        TransportController::assignments(authGuard());
+
+    } elseif ($path === '/api/v1/transport/assignments' && $id && $method === 'DELETE') {
+        TransportController::unassign(authGuard(), $id);
+
+    } elseif ($path === '/api/v1/transport/assign' && $method === 'POST') {
+        TransportController::assign(authGuard());
+
+    } elseif ($path === '/api/v1/transport/fee' && $method === 'POST') {
+        TransportController::recordFee(authGuard());
+
+    // ── HR (staff attendance, leave, payroll) ───────────────────────────────────
+    } elseif ($path === '/api/v1/hr/staff-attendance' && $method === 'GET') {
+        HRController::staffAttendance(authGuard());
+
+    } elseif ($path === '/api/v1/hr/staff-attendance' && $method === 'POST') {
+        HRController::saveStaffAttendance(authGuard());
+
+    } elseif ($path === '/api/v1/hr/leave' && !$id && $method === 'GET') {
+        HRController::leave(authGuard());
+
+    } elseif ($path === '/api/v1/hr/leave' && !$id && $method === 'POST') {
+        HRController::requestLeave(authGuard());
+
+    } elseif ($path === '/api/v1/hr/leave' && $id && $method === 'PUT') {
+        HRController::decideLeave(authGuard(), $id);
+
+    } elseif ($path === '/api/v1/hr/payroll' && $method === 'GET') {
+        HRController::payroll(authGuard());
+
+    } elseif ($path === '/api/v1/hr/payroll' && $method === 'POST') {
+        HRController::savePayroll(authGuard());
+
+    } elseif ($path === '/api/v1/hr/payroll/pay' && $method === 'POST') {
+        HRController::payPayroll(authGuard());
+
+    // ── Analytics (read-only dashboards) ────────────────────────────────────────
+    } elseif ($path === '/api/v1/analytics/performance' && $method === 'GET') {
+        AnalyticsController::performance(authGuard());
+
+    } elseif ($path === '/api/v1/analytics/attendance' && $method === 'GET') {
+        AnalyticsController::attendance(authGuard());
+
+    } elseif ($path === '/api/v1/analytics/finance' && $method === 'GET') {
+        AnalyticsController::finance(authGuard());
+
+    } elseif ($path === '/api/v1/analytics/admissions' && $method === 'GET') {
+        AnalyticsController::admissions(authGuard());
+
+    // ── Online assignments (teacher/admin) ──────────────────────────────────────
+    } elseif (preg_match('#^/api/v1/assignments/(\d+)/submissions$#', $path, $masub) && $method === 'GET') {
+        AssignmentController::submissions(authGuard(), (int)$masub[1]);
+
+    } elseif (preg_match('#^/api/v1/assignment-submissions/(\d+)/grade$#', $path, $mag) && $method === 'POST') {
+        AssignmentController::grade(authGuard(), (int)$mag[1]);
+
+    } elseif ($path === '/api/v1/assignments' && !$id && $method === 'GET') {
+        AssignmentController::index(authGuard());
+
+    } elseif ($path === '/api/v1/assignments' && !$id && $method === 'POST') {
+        AssignmentController::store(authGuard());
+
+    } elseif ($path === '/api/v1/assignments' && $id && $method === 'PUT') {
+        AssignmentController::update(authGuard(), $id);
+
+    } elseif ($path === '/api/v1/assignments' && $id && $method === 'DELETE') {
+        AssignmentController::destroy(authGuard(), $id);
+
+    // ── Communications (email + WhatsApp broadcasts, reminders, parent preview) ──
+    } elseif ($path === '/api/v1/communications/audiences' && $method === 'GET') {
+        CommunicationController::audiences(authGuard());
+
+    } elseif (preg_match('#^/api/v1/communications/events/(\d+)/remind$#', $path, $mcr) && $method === 'POST') {
+        CommunicationController::sendReminder(authGuard(), (int)$mcr[1]);
+
+    } elseif ($path === '/api/v1/communications/parent-preview' && $id && $method === 'GET') {
+        CommunicationController::parentPreview(authGuard(), $id);
+
+    } elseif ($path === '/api/v1/communications/events' && !$id && $method === 'GET') {
+        CommunicationController::events(authGuard());
+
+    } elseif ($path === '/api/v1/communications/events' && !$id && $method === 'POST') {
+        CommunicationController::saveEvent(authGuard());
+
+    } elseif ($path === '/api/v1/communications/events' && $id && $method === 'PUT') {
+        CommunicationController::saveEvent(authGuard(), $id);
+
+    } elseif ($path === '/api/v1/communications/events' && $id && $method === 'DELETE') {
+        CommunicationController::deleteEvent(authGuard(), $id);
+
+    } elseif ($path === '/api/v1/communications' && !$id && $method === 'GET') {
+        CommunicationController::history(authGuard());
+
+    } elseif ($path === '/api/v1/communications' && !$id && $method === 'POST') {
+        CommunicationController::send(authGuard());
 
     // ── Library ───────────────────────────────────────────────────────────────
     } elseif ($path === '/api/v1/library/books' && $method === 'GET') {

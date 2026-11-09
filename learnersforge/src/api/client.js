@@ -173,6 +173,53 @@ export const allocateRoom  = data => api.post('/hostel/allocate', data);
 export const getVisitors   = () => api.get('/hostel/visitors');
 export const logVisitor    = data => api.post('/hostel/visitors', data);
 
+// ── Transport ─────────────────────────────────────────────────────────────────
+export const getRoutes              = () => api.get('/transport/routes');
+export const createRoute            = data => api.post('/transport/routes', data);
+export const updateRoute            = (id, data) => api.put(`/transport/routes/${id}`, data);
+export const deleteRoute            = id => api.delete(`/transport/routes/${id}`);
+export const getTransportAssignments = term_id => api.get('/transport/assignments', { params: { term_id } });
+export const assignTransport        = data => api.post('/transport/assign', data);
+export const unassignTransport      = id => api.delete(`/transport/assignments/${id}`);
+export const recordTransportFee     = data => api.post('/transport/fee', data);
+
+// ── HR (staff attendance, leave, payroll) ──────────────────────────────────────
+export const getStaffAttendance  = date => api.get('/hr/staff-attendance', { params: { date } });
+export const saveStaffAttendance = (date, records) => api.post('/hr/staff-attendance', { date, records });
+export const getLeave            = () => api.get('/hr/leave');
+export const requestLeave        = data => api.post('/hr/leave', data);
+export const decideLeave         = (id, status) => api.put(`/hr/leave/${id}`, { status });
+export const getHrPayroll        = (month, year) => api.get('/hr/payroll', { params: { month, year } });
+export const savePayroll         = data => api.post('/hr/payroll', data);
+export const markPayrollPaid     = id => api.post('/hr/payroll/pay', { id });
+
+// ── Analytics ──────────────────────────────────────────────────────────────────
+export const getPerfAnalytics    = term_id => api.get('/analytics/performance', { params: { term_id } });
+export const getAttAnalytics     = term_id => api.get('/analytics/attendance', { params: { term_id } });
+export const getFinanceAnalytics = term_id => api.get('/analytics/finance', { params: { term_id } });
+export const getAdmissionAnalytics = () => api.get('/analytics/admissions');
+
+// ── Online assignments ─────────────────────────────────────────────────────────
+export const getAssignments       = class_id => api.get('/assignments', { params: { class_id } });
+export const createAssignment     = data => api.post('/assignments', data);
+export const updateAssignment     = (id, data) => api.put(`/assignments/${id}`, data);
+export const deleteAssignment     = id => api.delete(`/assignments/${id}`);
+export const getAssignmentSubmissions = id => api.get(`/assignments/${id}/submissions`);
+export const gradeAssignment      = (subId, data) => api.post(`/assignment-submissions/${subId}/grade`, data);
+export const getMyOnlineAssignments = () => api.get('/my/assignments');
+export const submitMyAssignment     = data => api.post('/my/assignment-submit', data);
+
+// ── Communications (email + WhatsApp broadcasts, reminders, parent preview) ─────
+export const getAudiences        = () => api.get('/communications/audiences');
+export const getCommunications   = () => api.get('/communications');
+export const sendCommunication   = data => api.post('/communications', data);
+export const getEvents           = () => api.get('/communications/events');
+export const saveEvent           = data => api.post('/communications/events', data);
+export const updateEvent         = (id, data) => api.put(`/communications/events/${id}`, data);
+export const deleteEvent         = id => api.delete(`/communications/events/${id}`);
+export const sendEventReminder   = (id, data) => api.post(`/communications/events/${id}/remind`, data);
+export const getParentPreview    = studentId => api.get(`/communications/parent-preview/${studentId}`);
+
 // ── Library ───────────────────────────────────────────────────────────────────
 export const getBooks      = () => api.get('/library/books');
 export const getLoans      = () => api.get('/library/loans');
